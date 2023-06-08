@@ -74,8 +74,13 @@ Contains the different formulations to find initial data.
 - BVP.BowenYork: 
     Bowen-York initial data for a set of black holes. Each black hole must have (mass, position, momentum, spin) as parameters.
 
+NOTE: In the future different initial data formulations will be added.
+
 ## Evolution: IVP 
 This class contains the different formulations to solve the evolution equations.
 
 - BSSN_puncture: 
     BSSN formulation with puncture gauge conditions.
+
+NOTE: In the future different evolution formulations will be added, such as ccz4, etc.
+

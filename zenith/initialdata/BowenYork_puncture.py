@@ -22,7 +22,8 @@ viewoptions.clipping.enable = 1
 
 
 sys.path.append(os.getcwd())
-from Geometries import *
+from zenith.utils.Geometries import *
+
 # exec(open("Geometries.py").read())
 # from Geometries import *
 
@@ -49,14 +50,19 @@ class BlackHole:
 
 class BowenYork:
 
-    def __init__(self, BHs):
+    def __init__(self, BHs, **kwargs):
 
         # list of black holes
         self.BHs = BHs
 
         # conformal metric
-        self.h = CF((1,0,0, 0,1,0, 0,0,1), dims = (3,3)) 
-
+        # if in kwargs there is a conformal metric, we use it, otherwise we set it to the flat metric
+        
+        if "conformal_metric" in kwargs:
+            self.h = kwargs["conformal_metric"]
+        else:
+            self.h = CF((1,0,0, 0,1,0, 0,0,1), dims = (3,3))
+    
         # unbouded initial function
         cf_invXi = CF((0))
         for BH in BHs: cf_invXi += BH.mass/(2*BH.r)

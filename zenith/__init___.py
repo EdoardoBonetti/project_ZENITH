@@ -1,3 +1,7 @@
-__all__ = ['EFE_Solver']
+__all__ = [ 'DefaultMesh',
+            'BlackHole',
+            'BowenYork',
+    ]
 
-# from .hdg_solver import CompressibleHDGSolver
+from .EFE_Solver import EFE_Solver
+from .utils.Geometries import DefaultMesh
