@@ -11,18 +11,11 @@ from netgen.csg import *
 from ngsolve.solvers import *
 # import the Bowen York solution
 
-from ngsolve.internal import visoptions
-from ngsolve.internal import viewoptions
-visoptions.scalfunction='u:0'
-visoptions.clipsolution = 'scal'
-viewoptions.clipping.nx= 0
-viewoptions.clipping.ny= 0
-viewoptions.clipping.nz= -1
-viewoptions.clipping.enable = 1
-
+import os
+import sys
 sys.path.append(os.getcwd())
-from Geometries import *
-from BowenYork_puncture import *
+from utils.Geometries import *
+from utils.CompactObjects import *
 
 
 # now we define the class for the BSSN-puncture variables
