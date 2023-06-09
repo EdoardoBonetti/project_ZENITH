@@ -20,6 +20,9 @@ from utils.CompactObjects import *
 
 # now we define the class for the BSSN-puncture variables
 
+
+
+
 class BSSNPuncture:
     # instead of tilda we use the notation _c for the conformal variables
     # also insetad of gamma we use the notation h for the conformal metric
@@ -31,8 +34,8 @@ class BSSNPuncture:
         # define the finite element spaces  
         self.scalarH1 = H1(self.mesh, order=  self.order)
         self.vecotrH1 = VectorValued(self.scalarH1, 3)
-        self.matrixH1 = VectorValued(self.scalarH1, 9) # dimension 3 x 3 symmetric matrix
-        self.tensorH1 = VectorValued(self.scalarH1, 27) # dimension 3 x 3 x 3  but last 2 entries are symmetric, in particular indexed is ijk -> i + j + k
+        self.matrixH1 = VectorValued(self.scalarH1, 6) # dimension 3 x 3 symmetric matrix
+        self.tensorH1 = VectorValued(self.scalarH1, 18) # dimension 3 x 3 x 3  but last 2 entries are symmetric, in particular indexed is ijk -> i + j + k
 
         # define the TnT fcs
         gamma , dgamma = self.matrixH1.TnT()
@@ -49,7 +52,6 @@ class BSSNPuncture:
         self.gf_Gamma = GridFunction(self.vecotrH1)
 
         self.gf_ChristoffelII = GridFunction(self.tensorH1)
-        self.gf_ContractedChristoffel = GridFunction(self.vecotrH1)
         self.gf_Ricci = GridFunction(self.matrixH1)
         self.gf_RicciScalar = GridFunction(self.scalarH1)
 

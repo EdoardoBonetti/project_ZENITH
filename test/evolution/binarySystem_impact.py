@@ -1,4 +1,5 @@
 from ngsolve import *
+from ngsolve import Einsum
 
 import sys
 from sys import path
@@ -10,7 +11,7 @@ from zenith.utils.CompactObjects import BlackHole
 from zenith.utils.Geometries import DefaultMesh
 
 def main():
-
+    
     # breate the black hole, can be done with the following command line options:
     mass1 = 1
     spin1 =(0,0,0)
@@ -86,6 +87,7 @@ def main():
     gf_h = GridFunction(VectorValued(h1,9))
     gf_Aij = GridFunction(VectorValued(h1,9))
     gf_W = GridFunction(h1)
+    help(gf_Aij.Einsum)
 
     kwargs["bonus_intorder"] = 10
     bowenyork.GetSolution(gf_h, gf_Aij, gf_W)
@@ -93,6 +95,7 @@ def main():
     Draw(gf_h, mesh, "h")
     Draw(gf_Aij, mesh, "Aij")
     Draw(gf_W, mesh, "W")
+
 
     #print((gf_Aij.Reshape((3,3))))
 
