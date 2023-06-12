@@ -24,95 +24,38 @@ from utils.CompactObjects import *
 
 
 class BSSNPuncture:
-    # instead of tilda we use the notation _c for the conformal variables
-    # also insetad of gamma we use the notation h for the conformal metric
-    def __init__(self, mesh, order = 2):
+    # the __init__ function take as input the 
+    def __init__(self, gf_gamma_c , gf_A_c , gf_W, gf_K, gf_Gamma_c, **kwargs):
 
-        self.mesh = mesh
-        self.order = order
-
-        # define the finite element spaces  
-        self.scalarH1 = H1(self.mesh, order=  self.order)
-        self.vecotrH1 = VectorValued(self.scalarH1, 3)
-        self.matrixH1 = VectorValued(self.scalarH1, 6) # dimension 3 x 3 symmetric matrix
-        self.tensorH1 = VectorValued(self.scalarH1, 18) # dimension 3 x 3 x 3  but last 2 entries are symmetric, in particular indexed is ijk -> i + j + k
+        self.scl_space = gf_W.space
+        self.vec_space = gf_Gamma_c.space
+        self.mat_space = gf_gamma_c.space
+        self.tns_space = VectorValued(W.space, 27)
 
         # define the TnT fcs
-        gamma , dgamma = self.matrixH1.TnT()
-        A, dA = self.matrixH1.TnT()
-        W, dW = self.scalarH1.TnT()
-        K, dK = self.scalarH1.TnT()
-        Gamma, dGamma = self.vecotrH1.TnT()
+        gamma , dgamma = self.mat_space.TnT()
+        A, dA = self.mat_space.TnT()
+        W, dW = self.scl_space.TnT()
+        K, dK = self.scl_space.TnT()
+        Gamma, dGamma = self.vec_space.TnT()
 
-        # define the grid functions
-        self.gf_gamma = GridFunction(self.matrixH1)
-        self.gf_A     = GridFunction(self.matrixH1)
-        self.gf_W     = GridFunction(self.scalarH1)
-        self.gf_K     = GridFunction(self.scalarH1)
-        self.gf_Gamma = GridFunction(self.vecotrH1)
+        # define the gridfunctions
+        self.gf_gamma_c = gf_gamma_c
+        self.gf_A_c = gf_A_c
+        self.gf_W = gf_W
+        self.gf_K = gf_K
+        self.gf_Gamma_c = gf_Gamma_c
 
-        self.gf_ChristoffelII = GridFunction(self.tensorH1)
-        self.gf_Ricci = GridFunction(self.matrixH1)
-        self.gf_RicciScalar = GridFunction(self.scalarH1)
-
-        self.gf_lapse = GridFunction(self.scalarH1)
-        self.gf_shift = GridFunction(self.vecotrH1)
+        self.gf_Chris_c = GridFunction(self.tns_space)
+        self.gf_Chris_w = GridFunction(self.tns_space)
+        self.gf_Ricci = GridFunction(self.mat_space)
+        self.gf_Ricciscal_c = GridFunction(self.scl_space)
+        self.gf_lapse = GridFunction(self.scl_space)
+        self.gf_shift = GridFunction(self.vec_space)
 
         # Ricci We need Rij_c + Rij_W 
-        self.Ricci_c = GridFunction(self.matrixH1)
-        self.Ricci_W = GridFunction(self.matrixH1)
-
-        # now we can define
-        def BilinearFormRicci_c(testspace, trialspace):
-            Ricc_c_BLF = BilinearForm(testspace= testspace, trialspace= trialspace)
-            div_Gamma = Grad(self.Gamma[0])[0]
-
-
-    def computeCS2(self):
-        for i in range(3):
-            for j in range(3):
-                for k in range(3):
-                    self.CS2.vec[i*9 + j*3 + k].Set(self.Gamma[i]* self.h[3*j+k])
-    
-    def ComputeContractedUpDown(self):
-        for i in range(3):
-            f = CF((0))
-            for k in range(3):
-                f += self.Gamma[k]*self.h[3*i+k]
-            self.UpperContractedCS2.vec[i].Set(f)
-
-
-    def ComputeRicci_c(self):
-        for i in range(3):
-            for j in range(3):
-                for k in range(3):
-                    self.Ricci_c.vec[i*3 +j].Set(Grad(self.CS2[i*9 + j*3 + k].Diff(k) + self.CS2[i*9 + k*3 + j].Diff(k) - self.CS2[k*9 + j*3 + i].Diff(k) - self.CS2[k*9 + i*3 + j].Diff(k)))
-    
-    def ComputeRicci(self):
-        for i in range(3):
-            for j in range(3):
-                for k in range(3):
-                    self.Ricci.vec[i*9 + j*3 + k].Set(self.Ricci_c[i*9 + j*3 + k] + self.Ricci_W[i*9 + j*3 + k])
-
-    # meshod to set the initial condition using the Bowen York solution 
-    def SetInitialCondition(self, BHs, method = "BowenYork", **kwargs):
-        if method == "BowenYork":
-
-            bowenyork = BowenYork(BHs) # set up the problem
-            bowenyork.Solve(self.h1)        # solve the pde
-            bowenyork.InitialConditions(self.h, self.A, self.W, **kwargs)
-            
-            self.K.Set(CF((0)))       
-            self.Gamma.Set(CF((0,0,0)))
-
-
-
-
-    def SetSlicing(self, method="geodesic"):
-        if method == "geodesic":
-            self.alpha.Set(CF((1)))
-            self.beta.Set(CF((0,0,0)))
-
+        self.Ricci_c = GridFunction(self.mat_space)
+        self.Ricci_W = GridFunction(self.mat_space)
 
     
     def Step(self, dt):
@@ -122,6 +65,12 @@ class BSSNPuncture:
         self.A.vec.data += dt * self.h.vec 
         #self.W.vec.data += dt * self.W.vec
         #self.K.vec.data += dt * self.A.vec
+
+    def IBilinearForm(fes,F,Fhatn,Ubnd):
+        a = BilinearForm(fes, nonassemble=True)
+        a += - InnerProduct(F(U),Grad(V)) * dx
+        a += InnerProduct(Fhatn(U),V) * dx(element_boundary=True)
+        return a
 
 
     def Draw(self, mesh):
