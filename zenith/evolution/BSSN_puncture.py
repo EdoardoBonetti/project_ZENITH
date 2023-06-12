@@ -14,8 +14,8 @@ from ngsolve.solvers import *
 import os
 import sys
 sys.path.append(os.getcwd())
-from utils.Geometries import *
-from utils.CompactObjects import *
+#from utils.Geometries import *
+#from utils.CompactObjects import *
 
 
 # now we define the class for the BSSN-puncture variables
