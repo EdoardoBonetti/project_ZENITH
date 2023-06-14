@@ -10,6 +10,7 @@ if currentpath not in sys.path: sys.path.append(currentpath)
 
 # define the class for the Einstein Bianchi equations
 class LinEinsteinBianchi:
+    
     def __init__(self, mesh, order, **kwargs):
         self.mesh = mesh
         
