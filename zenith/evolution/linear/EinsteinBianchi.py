@@ -2,6 +2,7 @@
 
 from ngsolve import *
 from netgen.csg import *    
+import matplotlib.pyplot as plt
 
 currentpath = "/home/ebonetti/Desktop/project_ZENITH/"
 if currentpath not in sys.path: sys.path.append(currentpath)
@@ -67,8 +68,32 @@ class EinsteinBianchi:
 
 
 
+        t = 0
+        tend = 1
+        dt = 1e-2
 
+        traceE = []
+        symH = []
+        divH = []
+        traceH = []
 
+        scene = Draw(Norm(gfH), mesh, clipping ={"x": 0, "y":0 , "z": -1})
+        #gfE.vec.data = massEinv * gfE.vec
+        SetNumThreads(8)
+        with TaskManager():
+            while t < tend:
+                gfE.vec.data += -dt * massEinv@bfcurlT.mat.T * gfH.vec
+                gfH.vec.data += dt * massHinv@bfcurlT.mat * gfE.vec
+                scene.Redraw()
+                t += dt
+                traceE.append(Integrate(Norm(Trace(gfE)), mesh) )    
+                symH.append(Integrate(Norm(Transpose(gfH)- gfH), mesh) )
+                traceH.append(Integrate(Norm(Trace(gfH)), mesh))
+
+        print(Integrate(Norm(gfE), mesh))
+        plt.plot(traceE)
+        plt.plot(symH)
+        plt.plot(traceH)
 
 
 
