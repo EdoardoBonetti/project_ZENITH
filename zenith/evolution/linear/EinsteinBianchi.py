@@ -1,38 +1,95 @@
 # in this file we define the einstein bianchi equations
 
 from ngsolve import *
-from netgen.csg import *
+from netgen.csg import *    
 
 currentpath = "/home/ebonetti/Desktop/project_ZENITH/"
 if currentpath not in sys.path: sys.path.append(currentpath)
 
 
+n = specialcf.normal(3)
+
+def CurlTHcc2Hcd(E,dH):
+    return InnerProduct(curl(E).trans, dH)*dx \
+       +InnerProduct(Cross(E*n, n), dH*n)*dx(element_boundary= True)
+
+def DivHcdHd(H,dv):
+    return div(H)*dv*dx - H*n*n * dv*n * dx(element_boundary= True)
+
+def Transpose(gfu):
+    return CF((   gfu[0,0],gfu[1,0],gfu[2,0],
+                  gfu[0,1],gfu[1,1],gfu[2,1],
+                  gfu[0,2],gfu[1,2],gfu[2,2]), dims = (3,3))
+
+def Trace(gfu): return CF((gfu[0,0]+gfu[1,1]+gfu[2,2]))
 
 # define the class for the Einstein Bianchi equations
-class LinEinsteinBianchi:
+class EinsteinBianchi:
+    """
+    This class creates the linearized Einstein Bianchi equations with the variables:
+    - Hcc: the curl of the electric field
+    - Hcd: the curl of the magnetic field
+    - Hd: the divergence of the magnetic field
+    """
     
     def __init__(self, mesh, order, **kwargs):
         self.mesh = mesh
         
         dirichlet = kwargs.get("dirichlet", "")
-        self.Hcc = HCurlCurl(mesh, order = order,  dirichlet = dirichlet)
-        self.Hcd = HCurlDiv( mesh, order = order,  dirichlet = dirichlet)
+        self.fescc = HCurlCurl(mesh, order = order,  dirichlet = dirichlet)
+        self.fescd = HCurlDiv(mesh, order=order,  dirichlet = dirichlet)
+        self.fesd = HDiv(mesh, order=order,  dirichlet = dirichlet)
+        self.fescd_d = self.fescd*self.fesd
+
+        E, dE = self.fescc.TnT()
+        (H,v), (dH, dv) = self.fescd_d.TnT()
+
 
         print("Define mass matrices:", end="\r")
-        self.massHcc = BilinearForm(self.Hcc, symmetric = True, nonassemble = kwargs.get("nonassemble", False))
-        self.massHcc += InnerProduct(self.Hcc.TrialFunction(), self.Hcc.TestFunction())*dx
-        if kwargs.get("nonassemble", False) == False: self.massHcc.Assemble()
+        self.massE = BilinearForm(InnerProduct(E,dE)*dx).Assemble()
 
-        self.massHcd = BilinearForm(self.Hcd, symmetric = True, nonassemble = kwargs.get("nonassemble", False))
-        self.massHcd += InnerProduct(self.Hcd.TrialFunction(), self.Hcd.TestFunction())*dx
-        if kwargs.get("nonassemble", False) == False: self.massHcd.Assemble()
-        print("Define mass matrices: done")
+        self.massH = BilinearForm(self.fescd_d)
+        self.massH += InnerProduct(H,dH)*dx + DivHcdHd(H,dv) + DivHcdHd(dH,v) - 1e-3*v*dv*dx - div(v)*div(dv)*dx
+        self.massH.Assemble()
 
-        print("Define inverse mass matrices:", end="\r")
-        inverse = kwargs.get("inverse", "sparsecholesky")
-        self.invmassHcc = self.massHcc.mat.Inverse(self.Hcc.FreeDofs(), inverse)
-        self.invmassHcd = self.massHcd.mat.Inverse(self.Hcd.FreeDofs(), inverse)
-        print("Define inverse mass matrices: done")
+        self.bfcurlT = BilinearForm(CurlTHcc2Hcd(E, self.fescd.TestFunction()), nonassemble= True).Assemble()
+
+        self.gfE = GridFunction(self.fescc)
+        self.gfH = GridFunction(self.fescd)
+
+        # initial conditions ....
+        self.gfH.vec[:] = 0.0
+        self.gfE.vec[:] = 0.0
+        
+        self.peak = exp(-((x-0.5)**2+(y-0.5)**2+(z-0.5)**2)/ 0.2**2 )
+        self.gfE.Set ( ((0, 0,self.peak), (0,0,0), (self.peak,0,0) ))
+        self.gfH.Set(  ((self.peak, 0,0), (0,0,0), (0,0,-self.peak)))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        self.massEinv = self.massE.mat.Inverse(inverse="pardiso")
+        self.massHinv = self.massH.mat.Inverse(inverse="pardiso")
+        self.resH     = self.fescd_d.restrictions[0]
+        self.massHinv = self.resH @ self.massHinv @ self.resH.T
+
+
 
         print("Define curl matrix:", end="\r") 
         u, du = self.Hcc.TnT()
