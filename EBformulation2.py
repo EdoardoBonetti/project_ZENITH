@@ -68,9 +68,9 @@ def main(h = 0.3, **kwargs):
 
     f = exp(-x*x-y*y-z*z)
 
-    E_0 = CF( ( f, 0, 0 , 0, 0, 0, 0, 0, -f) , dims=(3,3) ) 
+    B_0 = CF( ( f, 0, 0 , 0, 0, 0, 0, 0, -f) , dims=(3,3) ) 
     #E_0 = CF( ( 0, 0, 0 , 0, 0, 0, 0, 0, 0) , dims=(3,3) ) 
-    B_0 = CF( ( 0, 0, f , 0, 0, 0, f, 0, 0) , dims=(3,3) )
+    E_0 = CF( ( 0, 0, f , 0, 0, 0, f, 0, 0) , dims=(3,3) )
 
 
     fes = Hcc * Hdc * Hc
@@ -88,7 +88,7 @@ def main(h = 0.3, **kwargs):
     massHcc = BilinearForm(Hcc)
     massHcc += InnerProduct(u,du)*dx
     massHcc.Assemble()
-    invmassHcc = massHcc.mat.Inverse( inverse="pardiso")
+    invmassHcc = massHcc.mat.Inverse( inverse="sparsecholesky")
     invHcc = emb_Hcc @ invmassHcc @ emb_Hcc.T
 
     Hdcdofs = fes.Range(1)
@@ -97,7 +97,7 @@ def main(h = 0.3, **kwargs):
     massHdc = BilinearForm(Hdc)
     massHdc += InnerProduct(v,dv)*dx
     massHdc.Assemble()
-    invmassHdc = massHdc.mat.Inverse( inverse="pardiso")
+    invmassHdc = massHdc.mat.Inverse( inverse="sparsecholesky")
     invHdc = emb_Hdc @ invmassHdc @ emb_Hdc.T
     
     Hdofs = fes.Range(2)
@@ -106,7 +106,7 @@ def main(h = 0.3, **kwargs):
     massH = BilinearForm(Hc)
     massH += InnerProduct(p,dp)*dx
     massH.Assemble()
-    invmassH = massH.mat.Inverse( inverse="pardiso")
+    invmassH = massH.mat.Inverse( inverse="sparsecholesky")
     invH = emb_H @ invmassH @ emb_H.T
 
     print("curl operator Hcd -> Hcc: from E to B:")
@@ -154,7 +154,7 @@ def main(h = 0.3, **kwargs):
     
     CalcEnergy(gf, Eneries, mesh)
 
-    dt = 0.01
+    dt = 0.02
     for i in range(100):
         gf.vec.data += dt * invH @ D * gf.vec
         gf.vec.data += -dt * invHcc @ B * gf.vec    
@@ -190,4 +190,4 @@ if __name__ == '__main__':
     with TaskManager():
         #curlfromHccToHdc(h = 0.2, order=1, omega=1)
         #curlfromHdcToHcc(h = 0.2, order=0, omega=1, divergence = False)
-        main(h = 0.6, order=2, omega=1)
+        main(h = 0.6, order=1, omega=1)
