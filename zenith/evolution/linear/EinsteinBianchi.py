@@ -3,6 +3,9 @@
 from ngsolve import *
 from netgen.csg import *    
 import matplotlib.pyplot as plt
+from ngsolve.la import EigenValues_Preconditioner
+
+import numpy as np
 
 currentpath = "/home/ebonetti/Desktop/project_ZENITH/"
 if currentpath not in sys.path: sys.path.append(currentpath)
@@ -33,236 +36,169 @@ class EinsteinBianchi:
     - Hd: the divergence of the magnetic field
     """
     
-    def __init__(self, mesh, order, **kwargs):
-        self.mesh = mesh
-        
+    def __init__(self, mesh, **kwargs):
+        self.order = kwargs.get("order", 2)
         dirichlet = kwargs.get("dirichlet", "")
-        self.fescc = HCurlCurl(mesh, order = order,  dirichlet = dirichlet)
-        self.fescd = HCurlDiv(mesh, order=order,  dirichlet = dirichlet)
-        self.fesd = HDiv(mesh, order=order,  dirichlet = dirichlet)
-        self.fescd_d = self.fescd*self.fesd
+        condense = kwargs.get("condense", False)
+        nonassemble = kwargs.get("nonassemble", False)
 
-        E, dE = self.fescc.TnT()
-        (H,v), (dH, dv) = self.fescd_d.TnT()
-
-
-        print("Define mass matrices:", end="\r")
-        self.massE = BilinearForm(InnerProduct(E,dE)*dx).Assemble()
-
-        self.massH = BilinearForm(self.fescd_d)
-        self.massH += InnerProduct(H,dH)*dx + DivHcdHd(H,dv) + DivHcdHd(dH,v) - 1e-3*v*dv*dx - div(v)*div(dv)*dx
-        self.massH.Assemble()
-
-        self.bfcurlT = BilinearForm(CurlTHcc2Hcd(E, self.fescd.TestFunction()), nonassemble= True).Assemble()
-
-        self.gfE = GridFunction(self.fescc)
-        self.gfH = GridFunction(self.fescd)
-
-        # initial conditions ....
-        self.gfH.vec[:] = 0.0
-        self.gfE.vec[:] = 0.0
+        # mesh and finite element spaces
+        self.mesh = mesh
+        self.fescc = HCurlCurl(mesh, order = self.order,  dirichlet = dirichlet)
+        self.fescd = HCurlDiv(mesh, order=self.order,  dirichlet = dirichlet)
+        self.fesd = HDiv(mesh, order=self.order, RT=True,   dirichlet = dirichlet)
         
-        self.peak = exp(-((x-0.5)**2+(y-0.5)**2+(z-0.5)**2)/ 0.2**2 )
-        self.gfE.Set ( ((0, 0,self.peak), (0,0,0), (self.peak,0,0) ))
-        self.gfH.Set(  ((self.peak, 0,0), (0,0,0), (0,0,-self.peak)))
+        #self.fescd_d = self.fescd*self.fesd
+
+        # define the grid functions
+        self.gfE = GridFunction(self.fescc)
+        self.gfB = GridFunction(self.fescd)
+        self.gfv = GridFunction(self.fesd)
+
+        self.gfB.vec[:] = 0.0
+        self.gfE.vec[:] = 0.0
+        self.gfv.vec[:] = 0.0
+
+        self.energyB = []
+        self.energyE = []
+        self.energyv = []
+        self.energyTraceE = []
+        self.energySymB = []
 
 
+        # define trial and test functions
+        self.E, self.dE = self.fescc.TnT()
+        self.v, self.dv = self.fesd.TnT()
+        self.B, self.dB = self.fescd.TnT()
 
-        t = 0
-        tend = 1
-        dt = 1e-2
+        # RHS matrices
+        self.bfcurlT = BilinearForm(CurlTHcc2Hcd(self.E, self.fescd.TestFunction()), nonassemble= nonassemble).Assemble()
+        self.bfdiv = BilinearForm(DivHcdHd(self.B, self.dv)).Assemble()
 
-        traceE = []
-        symH = []
-        divH = []
-        traceH = []
+        # dont know if this is needed
+        #for e in mesh.edges:
+        #    for dof in self.fescc.GetDofNrs(e):
+        #        self.fescc.couplingtype[dof] = COUPLING_TYPE.WIREBASKET_DOF
 
-        scene = Draw(Norm(gfH), mesh, clipping ={"x": 0, "y":0 , "z": -1})
-        #gfE.vec.data = massEinv * gfE.vec
-        SetNumThreads(8)
-        with TaskManager():
-            while t < tend:
-                gfE.vec.data += -dt * massEinv@bfcurlT.mat.T * gfH.vec
-                gfH.vec.data += dt * massHinv@bfcurlT.mat * gfE.vec
-                scene.Redraw()
-                t += dt
-                traceE.append(Integrate(Norm(Trace(gfE)), mesh) )    
-                symH.append(Integrate(Norm(Transpose(gfH)- gfH), mesh) )
-                traceH.append(Integrate(Norm(Trace(gfH)), mesh))
+        if condense:
+            self.massE = BilinearForm(InnerProduct(self.E,self.dE)*dx, condense=True)
+            self.preE = Preconditioner(self.massE, "bddc", block=True, blocktype="edgepatch")
+            self.massE.Assemble()
+            matE = self.massE.mat
+            # preE = matE.CreateBlockSmoother(fescc.CreateSmoothingBlocks(blocktype="edgepatch", eliminate_internal=True), GS=False)
 
-        print(Integrate(Norm(gfE), mesh))
-        plt.plot(traceE)
-        plt.plot(symH)
-        plt.plot(traceH)
+            self.massEinvSchur = CGSolver (matE, self.preE)
+            Eext = IdentityMatrix()+self.massE.harmonic_extension
+            EextT = IdentityMatrix()+self.massE.harmonic_extension_trans
+            self.massEinv =  Eext @ self.massEinvSchur @ EextT + self.massE.inner_solve
+        else :
+            self.massE = BilinearForm(InnerProduct(self.E,self.dE)*dx)
+            self.preE = Preconditioner(self.massE, "bddc", block=True, blocktype="edgepatch")
+            self.massE.Assemble()
+            self.matE = self.massE.mat
+            self.massEinv = CGSolver (self.matE, self.preE)
 
+        if condense:
+            self.massB = BilinearForm(InnerProduct(self.B,self.dB)*dx, condense=True)
+            self.preB = Preconditioner(self.massB, "bddc", block=True, blocktype="edgepatch")
+            # preH = matH.CreateSmoother(fescd.FreeDofs(True), GS=False)
+            self.massB.Assemble()
+            self.matB = self.massB.mat
+            self.massBinvSchur = CGSolver (self.matB, self.preB)
+            ext = IdentityMatrix()+self.massB.harmonic_extension
+            extT = IdentityMatrix()+self.massB.harmonic_extension_trans
+            self.massBinv =  ext @ self.massBinvSchur @ extT + self.massB.inner_solve
+        else :
+            self.massB = BilinearForm(InnerProduct(self.B,self.dB)*dx)
+            self.preB = Preconditioner(self.massB, "bddc", block=True, blocktype="edgepatch")
+            self.massB.Assemble()
+            self.matB = self.massB.mat
+            self.massBinv = CGSolver (self.matB, self.preB)
+        
+        
+        if condense:
+            self.massv = BilinearForm(InnerProduct(self.v,self.dv)*dx, condense=True).Assemble()
+            self.matv = self.massv.mat
+            self.prev = self.matv.CreateSmoother(self.fesd.FreeDofs(True), GS=False)
 
+            self.massvinvSchur = CGSolver (self.matv, self.prev)
+            self.ext = IdentityMatrix()+self.massv.harmonic_extension
+            self.extT = IdentityMatrix()+self.massv.harmonic_extension_trans
+            self.massvinv =  self.ext @ self.massvinvSchur @ self.extT + self.massv.inner_solve
+        else :  
+            self.massv = BilinearForm(InnerProduct(self.v,self.dv)*dx)
+            self.prev = Preconditioner(self.massv, "bddc", block=True, blocktype="edgepatch")
+            self.massv.Assemble()
+            self.matv = self.massv.mat
+            self.massvinv = CGSolver (self.matv, self.prev)
 
+    def SetInitialCondition(self, **kwargs):
 
+        peak = exp(-((x-0.5)**2+(y-0.5)**2+(z-0.5)**2)/ 0.2**2 )
+        self.gfE.Set ( ((peak, 0,0), (0,0,0), (0,0,-peak) ))     
+        self.gfB.Set ( ((0,0,-peak), (0,0,0), (-peak,0,0) ))
 
+    def TimeStep(self, dt, **kwargs):
 
+        # tend = 5 * dt
+        #scene = Draw(Norm(gfB), mesh)
+  
+        self.gfE.vec.data += -dt * self.massEinv@self.bfcurlT.mat.T * self.gfB.vec
+        self.gfv.vec.data += -dt * self.massvinv@self.bfdiv.mat * self.gfB.vec
+        hv = self.bfcurlT.mat * self.gfE.vec + self.bfdiv.mat.T * self.gfv.vec
+        self.gfB.vec.data += dt * self.massBinv * hv
+        #self.gfB.vec.data += dt * self.massBinvSchur * (self.bfcurlT.mat * self.gfE.vec + self.bfdiv.mat.T * self.gfv.vec)
+        
+  
+    def PlotEigenvalues(self):
+        print (EigenValues_Preconditioner(self.matE, self.preE).NumPy())
+        print (EigenValues_Preconditioner(self.matB, self.preB).NumPy())
+        print (EigenValues_Preconditioner(self.matv, self.prev).NumPy())
 
+    def TrachEnergy(self):
+        self.energyTraceE.append (Integrate ( Norm (Trace(self.gfE)), self.mesh ))
+        self.energySymB.append (Integrate ( Norm (self.gfB.trans -self.gfB), self.mesh ))
+        self.energyE.append (Integrate ( Norm (self.gfE), self.mesh ))
+        self.energyB.append (Integrate ( Norm (self.gfB), self.mesh ))
+        self.energyv.append (Integrate ( Norm (self.gfv), self.mesh ))
 
-
-
-
-
-
-
-
-        self.massEinv = self.massE.mat.Inverse(inverse="pardiso")
-        self.massHinv = self.massH.mat.Inverse(inverse="pardiso")
-        self.resH     = self.fescd_d.restrictions[0]
-        self.massHinv = self.resH @ self.massHinv @ self.resH.T
-
-
-
-        print("Define curl matrix:", end="\r") 
-        u, du = self.Hcc.TnT()
-        v, dv = self.Hcd.TnT()
-        n = specialcf.normal(mesh.dim)
-        Cn = CoefficientFunction( (0, n[2], -n[1], -n[2], 0, n[0], n[1], -n[0], 0) , dims=(3,3) )
-        Pn = OuterProduct(n,n)
-        Qn = Id(3) - Pn        
-        def CurlOp(u,v) : return InnerProduct(curl(u),v)*dx + InnerProduct(Cn*u*Pn,v)*dx(element_boundary= True)
-        self.curlOp = BilinearForm(trialspace = self.Hcd, testspace = self.Hcc, nonassemble = kwargs.get("nonassemble", False))
-        self.curlOp += CurlOp(du, v)
-        if kwargs.get("nonassemble", False) == False: self.curlOp.Assemble()
-        print("Define curl matrix: done")
-
-#        if kwargs.get("nonassemble", False) == False: self.curlOp.Assemble()
-        self.invmasscurl = self.invmassHcc @ self.curlOp.mat.T 
-
-        self.gf_E = GridFunction(self.Hcc)
-        self.gf_B = GridFunction(self.Hcd)
-
-    def SetInitialValues(self, cf_E, cf_B):
-        self.gf_E.Set(cf_E)
-        self.gf_B.Set(cf_B)
-
-    def ApplyCurl(self, gf_out, gf_in, **kwargs):
-        gf_out.vec.data = self.invmasscurl * gf_in.vec
-
-    def Plot(self):
-        Draw(self.gf_E, self.mesh, "E")
-        Draw(self.gf_B, self.mesh, "B")
-
-    def Step(self, dt):
-        self.gf_E.vec.data -= dt * self.invmassHcc @ self.curlOp.mat * self.gf_B.vec
-        self.gf_B.vec.data += dt * self.invmassHcd @ self.curlOp.mat.T * self.gf_E.vec
-
-
-
-###########################################################################################
-# test the class
-###########################################################################################
-
-
-def Div(u):
-    if u.dim == 3:
-        return u[0].Diff(x)+u[1].Diff(y)+u[2].Diff(z)
-    if u.dim == 9:
-        return CF( (Div(u[0,:]),Div(u[1,:]),Div(u[2,:])),dims=(3,3) )
-
-def Curl(u):
-    if u.dim == 3:
-        return CF( (u[2].Diff(y)- u[1].Diff(z), -u[2].Diff(x)+ u[0].Diff(z), -u[0].Diff(y)+ u[1].Diff(x)) )
-    if u.dim == 9:
-        return CF( (Curl(u[0,:]),Curl(u[1,:]),Curl(u[2,:])),dims=(3,3) )
-    
-def Transpose(u):
-    return CF ( (u[0,0],u[1,0],u[2,0],u[0,1],u[1,1],u[2,1],u[0,2],u[1,2],u[2,2]),dims=(3,3) )
-
-def Inc(u):
-    return Transpose(Curl( Transpose( Curl( u ) ) ))
+    def PlotEnergy(self):
+        plt.plot(self.energyTraceE, label='TraceE')
+        plt.plot(self.energySymB, label='SymB')
+        plt.plot(self.energyE, label='E')
+        plt.plot(self.energyB, label='B')
+        plt.plot(self.energyv, label='v')
+        plt.legend()
+        plt.show()
 
 
 def main():
+        
+        mesh= Mesh(unit_cube.GenerateMesh(maxh=0.2))
+        
+        t = 0
+        tend = 1
+        dt = 0.001
 
-    kwargs = {"inverse" : "sparsecholesky",
-              "nonassemble" : False, 
-              "order" : 1}
+        eb = EinsteinBianchi(mesh, condense=True, order=2)
+        eb.SetInitialCondition()
+        
+        Draw (Norm(eb.gfE), mesh, "E")
+        #Draw (Norm(Norm(eb.gfB)), mesh, "B")
+        #Draw (Norm(eb.gfv), mesh, "v")
+        eb.TrachEnergy()
 
-    cube = Sphere(Pnt(0,0,0), 1)
-    geo = CSGeometry()
-    geo.Add (cube)
-    mesh = Mesh(geo.GenerateMesh(maxh=0.4) )
-
-    
-    eb = LinEinsteinBianchi(mesh,**kwargs)
-
-    r = sqrt(x*x+y*y+z*z)
-    cf_f = CF( (exp(-r*r), 0, 0 , 0, -exp(-r*r), 0, 0, 0, 0), dims=(3,3) )
-
-    cf_init = Inc(cf_f).Compile()
-
-    Draw(cf_init,mesh,"cf_init")
-
-    TestInitialCondition(cf_init, mesh)
-    input("Press Enter to continue...")    
-    
-    initial_E = cf_init
-    initial_B = cf_init
-
-    # set initial values
-    print("Setting initial values")
-    eb.SetInitialValues(cf_E=initial_E, cf_B=initial_B)
-    print("Plotting")
-    eb.Plot()
-    print("Done")
-    input("Press Enter to continue...")
-    for i in range(100):
-        eb.Step(0.005)
-        eb.Plot()
-
-def TestInitialCondition(u, mesh):
-    # we test if it is divergence free, symmetric and traceless
-    print("Testing initial condition")
-    #print("Divergence free: ", Integrate(Norm(Div(u).Compile()),mesh))
-    #print("Symmetric: ", Integrate(Norm(u-Transpose(u)).Compile(),mesh))
-    print("Traceless: ", Integrate(Norm(Trace(u)).Compile(),mesh))
-
-
-def test(h = 1):
-   
-    cube = Sphere(Pnt(0,0,0), 2)
-    geo = CSGeometry()
-    geo.Add (cube)
-    mesh = Mesh(geo.GenerateMesh(maxh=h) )
-    order = 1
-    eb = LinEinsteinBianchi(mesh, order, **{"nonassemble" : False, "inverse" : "sparsecholesky", "dirichlet" : ".*"})
-
-    r = sqrt(x*x+y*y+z*z)
-    initial_E = CF( (exp(-r*r), 0, 0 , 0, -exp(-r*r), 0, 0, 0, 0), dims=(3,3) )
-    final_B = Curl(initial_E)
-
-    gf_E = GridFunction(eb.Hcc)
-    gf_exact_curl_B = GridFunction(eb.Hcd)
-    gf_E.Set(initial_E)
-    gf_exact_curl_B.Set(final_B)
-
-
-
-
-    gf_numerical_curl_B = GridFunction(eb.Hcd)
-    gf_numerical_curl_B.Set(gf_exact_curl_B, BND)
-    gf_numerical_curl_B.vec.data = eb.invmassHcd @ eb.curlOp.mat.T* gf_E.vec
-    error = gf_exact_curl_B  - final_B
-    print("h: " , h , "  error = ", Integrate (sqrt(InnerProduct(error,error)), mesh) )
-    # Draw(gf_numerical_curl_B, mesh, "curl_numerical_E")
-    # Draw(final_B, mesh, "curl_exact_E")
-    # Draw(error, mesh, "error")
-    # for i in range(3): 
-    #     for j in range(3):
-    #         print("error[%d,%d] = %f"%(i,j,Integrate(Norm(error[i,j]),mesh)))
-    return Integrate (sqrt(InnerProduct(error,error)), mesh)
-
+        while t < tend:
+            t += dt
+            eb.TimeStep(dt)
+            eb.TrachEnergy()
+            #Draw (Norm(eb.gfE), mesh, "E")
+            #Draw (Norm(eb.gfB), mesh, "B")
+            #Draw (Norm(eb.gfv), mesh, "v")
+            
+            # print time in percent and the energies to the 4th decimal place
+            print(" t:", int(100*t/tend) , "% " , "E: {:.4f} B: {:.4f} v: {:.4f}".format(eb.energyE[-1], eb.energyB[-1], eb.energyv[-1]), end="\r")
+        eb.PlotEnergy()
 
 if __name__ == "__main__":
-    H = []
-    with TaskManager():
-        for h in [1.5, 0.75, 0.375, 0.1875]:
-            H.append(test(h))
-
-    print(H)
-    print("Convergence rate: ", [log(H[i-1]/H[i])/log(2) for i in range(1,len(H))])
-
+    with TaskManager(): main()
