@@ -19,6 +19,7 @@ from ngsolve.solvers import *
 def DefaultMesh(
         h : float =0.15, 
         R : float =20, 
+        small_rad : float = 1,
         **kwargs : dict 
         ) -> Mesh:
     
@@ -92,7 +93,7 @@ def DefaultMesh(
     else:
         # create a mesh
         geo = CSGeometry()
-        sphere_inner = Sphere(Pnt(0,0,0),1).maxh(h)
+        sphere_inner = Sphere(Pnt(0,0,0),small_rad ).maxh(h)
         sphere_inner.bc("inner")
         geo.Add(sphere_inner)
         sphere_outer = Sphere(Pnt(0,0,0),R)
