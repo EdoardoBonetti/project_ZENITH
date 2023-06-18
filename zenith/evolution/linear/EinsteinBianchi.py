@@ -61,19 +61,22 @@ class EinsteinBianchi:
         self.condense = kwargs.get("condense", False)
         self.nonassemble = kwargs.get("nonassemble", False)
         self.iterative = kwargs.get("iterative", False)
+        self.divfree = kwargs.get("divfree", False)
 
         # mesh and finite element spaces
         self.mesh = mesh
         self.fescc = HCurlCurl(self.mesh, order = self.order,  dirichlet = self.dirichlet)
         self.fescd = HCurlDiv(self.mesh, order=self.order,  dirichlet = self.dirichlet)
         self.fesd = HDiv(self.mesh, order=self.order, RT=True,   dirichlet = self.dirichlet)
-        
+        if self.divfree:
+            self.fescd_d =   self.fescd*self.fesd
         #self.fescd_d = self.fescd*self.fesd
 
         # define the grid functions
         self.gfE = GridFunction(self.fescc)
         self.gfB = GridFunction(self.fescd)
         self.gfv = GridFunction(self.fesd)
+  
 
         self.gfB.vec[:] = 0.0
         self.gfE.vec[:] = 0.0
@@ -88,95 +91,130 @@ class EinsteinBianchi:
 
         # define trial and test functions
         self.E, self.dE = self.fescc.TnT()
-        self.v, self.dv = self.fesd.TnT()
-        self.B, self.dB = self.fescd.TnT()
+        if self.divfree:
+            (self.B,self.v), (self.dB, self.dv) = self.fescd_d.TnT()
+        else :
+            self.v, self.dv = self.fesd.TnT()
+            self.B, self.dB = self.fescd.TnT()
 
         # RHS matrices
-        self.bfcurlT = BilinearForm(CurlTHcc2Hcd(self.E, self.fescd.TestFunction()), nonassemble= self.nonassemble).Assemble()
-        self.bfdiv = BilinearForm(DivHcdHd(self.B, self.dv)).Assemble()
+        self.bfcurlT = BilinearForm(CurlTHcc2Hcd(self.E, self.fescd.TestFunction()), nonassemble= self.nonassemble)
+        self.bfdiv = BilinearForm(DivHcdHd(self.B, self.dv), nonassemble= self.nonassemble)
+        if self.nonassemble == True:
+            self.bfcurl = BilinearForm(CurlTHcc2Hcd(self.dE, self.fescd.TrialFunction()), nonassemble= self.nonassemble)
+            self.bfdivT = BilinearForm(DivHcdHd(self.dB, self.v), nonassemble= self.nonassemble)
+        if self.nonassemble == False:
+            self.bfcurlT.Assemble()
+            self.bfdiv.Assemble()
+            self.bfcurl.mat = self.bfcurlT.mat.T
+            self.bfdivT.mat = self.bfdiv.mat.T
+
 
         # dont know if this is needed
-        #for e in mesh.edges:
-        #    for dof in self.fescc.GetDofNrs(e):
-        #        self.fescc.couplingtype[dof] = COUPLING_TYPE.WIREBASKET_DOF
+        for e in mesh.edges:
+            for dof in self.fescc.GetDofNrs(e):
+                self.fescc.couplingtype[dof] = COUPLING_TYPE.WIREBASKET_DOF
 
-        if self.condense:
+        if self.condense and self.iterative :
+            # mass matrix for the electric field
             self.massE = BilinearForm(InnerProduct(self.E,self.dE)*dx, condense=True)
             self.preE = Preconditioner(self.massE, "bddc", block=True, blocktype="edgepatch")
             self.massE.Assemble()
             matE = self.massE.mat
-            # preE = matE.CreateBlockSmoother(fescc.CreateSmoothingBlocks(blocktype="edgepatch", eliminate_internal=True), GS=False)
-
             self.massEinvSchur = CGSolver (matE, self.preE)
             Eext = IdentityMatrix()+self.massE.harmonic_extension
             EextT = IdentityMatrix()+self.massE.harmonic_extension_trans
             self.massEinv =  Eext @ self.massEinvSchur @ EextT + self.massE.inner_solve
-        elif self.iterative :
-            self.massE = BilinearForm(InnerProduct(self.E,self.dE)*dx)
-            self.preE = Preconditioner(self.massE, "bddc", block=True, blocktype="edgepatch")
-            self.massE.Assemble()
-            self.matE = self.massE.mat
-            self.massEinv = CGSolver (self.matE, self.preE)
-        else :
-            self.massE = BilinearForm(InnerProduct(self.E,self.dE)*dx).Assemble()
-            self.massEinv = self.massE.mat.Inverse(inverse="sparsecholesky")
 
-        if self.condense:
+            # mass matrix for the magnetic field
             self.massB = BilinearForm(InnerProduct(self.B,self.dB)*dx, condense=True)
             self.preB = Preconditioner(self.massB, "bddc", block=True, blocktype="edgepatch")
-            # preH = matH.CreateSmoother(fescd.FreeDofs(True), GS=False)
             self.massB.Assemble()
             self.matB = self.massB.mat
             self.massBinvSchur = CGSolver (self.matB, self.preB)
             ext = IdentityMatrix()+self.massB.harmonic_extension
             extT = IdentityMatrix()+self.massB.harmonic_extension_trans
             self.massBinv =  ext @ self.massBinvSchur @ extT + self.massB.inner_solve
+
+            # mass matrix for the divergence field
+            self.massv = BilinearForm(InnerProduct(self.v,self.dv)*dx, condense=True).Assemble()
+            self.matv = self.massv.mat
+            self.prev = self.matv.CreateSmoother(self.fesd.FreeDofs(True), GS=False)
+            self.massvinvSchur = CGSolver (self.matv, self.prev)
+            self.Vext = IdentityMatrix()+self.massv.harmonic_extension
+            self.VextT = IdentityMatrix()+self.massv.harmonic_extension_trans
+            self.massvinv =  self.Vext @ self.massvinvSchur @ self.VextT + self.massv.inner_solve
+
         elif self.iterative :
+            # mass matrix for the electric field
+            self.massE = BilinearForm(InnerProduct(self.E,self.dE)*dx)
+            self.preE = Preconditioner(self.massE, "bddc", block=True, blocktype="edgepatch")
+            self.massE.Assemble()
+            self.matE = self.massE.mat
+            self.massEinv = CGSolver (self.matE, self.preE)
+
+            # mass matrix for the magnetic field
             self.massB = BilinearForm(InnerProduct(self.B,self.dB)*dx)
             self.preB = Preconditioner(self.massB, "bddc", block=True, blocktype="edgepatch")
             self.massB.Assemble()
             self.matB = self.massB.mat
             self.massBinv = CGSolver (self.matB, self.preB)
-        else :
-            self.massB = BilinearForm(InnerProduct(self.B,self.dB)*dx).Assemble()
-            self.massBinv = self.massB.mat.Inverse(inverse="sparsecholesky")
-        
-        
-        if self.condense:
-            self.massv = BilinearForm(InnerProduct(self.v,self.dv)*dx, condense=True).Assemble()
-            self.matv = self.massv.mat
-            self.prev = self.matv.CreateSmoother(self.fesd.FreeDofs(True), GS=False)
 
-            self.massvinvSchur = CGSolver (self.matv, self.prev)
-            self.ext = IdentityMatrix()+self.massv.harmonic_extension
-            self.extT = IdentityMatrix()+self.massv.harmonic_extension_trans
-            self.massvinv =  self.ext @ self.massvinvSchur @ self.extT + self.massv.inner_solve
-        elif self.iterative :  
+            # mass matrix for the divergence field
             self.massv = BilinearForm(InnerProduct(self.v,self.dv)*dx)
             self.prev = Preconditioner(self.massv, "bddc", block=True, blocktype="edgepatch")
             self.massv.Assemble()
             self.matv = self.massv.mat
             self.massvinv = CGSolver (self.matv, self.prev)
+
+        elif self.divfree :
+            print("divfree method")
+            self.massE = BilinearForm(InnerProduct(self.E,self.dE)*dx).Assemble()
+            self.massH = BilinearForm(self.fescd_d)
+            self.massH += InnerProduct(self.B,self.dB)*dx + DivHcdHd(self.B,self.dv) + DivHcdHd(self.dB,self.v) - 1e-3*self.v*self.dv*dx - div(self.v)*div(self.dv)*dx
+            self.massH.Assemble()
+            self.massEinv = self.massE.mat.Inverse(inverse="sparsecholesky")
+            self.massHinv = self.massH.mat.Inverse(inverse="sparsecholesky")
+            self.resB = self.fescd_d.restrictions[0]
+            self.massBinv = self.resB@self.massHinv@self.resB.T
+            self.massB = self.resB @ self.massH.mat @ self.resB.T
+
         else :
+            print("basic method")
+            # mass matrix for the electric field
+            self.massE = BilinearForm(InnerProduct(self.E,self.dE)*dx).Assemble()
+            self.massEinv = self.massE.mat.Inverse(inverse="sparsecholesky")
+
+            # mass matrix for the magnetic field
+            self.massB = BilinearForm(InnerProduct(self.B,self.dB)*dx).Assemble()
+            self.massBinv = self.massB.mat.Inverse(inverse="sparsecholesky")
+
+            # mass matrix for the divergence field
             self.massv = BilinearForm(InnerProduct(self.v,self.dv)*dx).Assemble()
             self.massvinv = self.massv.mat.Inverse(inverse="sparsecholesky")
-        
+
+
 
     def SetInitialCondition(self, **kwargs):
-
-        peak = exp(-((x-0.5)**2+(y-0.5)**2+(z-0.5)**2)/0.5**2 )
+        peak = exp(-((x)**2+(y)**2+(z)**2)/0.5**2 )
         self.gfE.Set ( ((peak, 0,0), (0,0,0), (0,0,-peak) ))     
         #self.gfB.Set ( ((0,0,-peak), (0,0,0), (-peak,0,0) ))
 
     def TimeStep(self, dt, **kwargs):
-
         # tend = 5 * dt
-        #scene = Draw(Norm(gfB), mesh)
-  
-        self.gfE.vec.data += -dt * self.massEinv@self.bfcurlT.mat.T * self.gfB.vec
-        self.gfv.vec.data += -dt * self.massvinv@self.bfdiv.mat * self.gfB.vec
-        hv = self.bfcurlT.mat * self.gfE.vec + self.bfdiv.mat.T * self.gfv.vec
-        self.gfB.vec.data += dt * self.massBinv * hv
+        if self.divfree :
+                self.gfE.vec.data += -dt * self.massEinv@self.bfcurlT.mat.T *self.gfB.vec
+                self.gfB.vec.data += dt *  self.massBinv@self.bfcurlT.mat * self.gfE.vec
+        else : #if self.nonassemble :
+            self.gfE.vec.data += -dt * self.massEinv@self.bfcurl.mat * self.gfB.vec
+            self.gfv.vec.data += -dt * self.massvinv@self.bfdiv.mat * self.gfB.vec
+            hv = self.bfcurlT.mat * self.gfE.vec + self.bfdivT.mat * self.gfv.vec
+            self.gfB.vec.data += dt * self.massBinv * hv
+        #else :
+        #    self.gfE.vec.data += -dt * self.massEinv@self.bfcurlT.mat.T * self.gfB.vec
+        #    self.gfv.vec.data += -dt * self.massvinv@self.bfdiv.mat * self.gfB.vec
+        #    hv = self.bfcurlT.mat * self.gfE.vec + self.bfdiv.mat.T * self.gfv.vec
+        #    self.gfB.vec.data += dt * self.massBinv * hv
         #self.gfB.vec.data += dt * self.massBinvSchur * (self.bfcurlT.mat * self.gfE.vec + self.bfdiv.mat.T * self.gfv.vec)
         
   
@@ -189,49 +227,36 @@ class EinsteinBianchi:
         self.energyTraceE.append (Integrate ( Norm (Trace(self.gfE)), self.mesh ))
         self.energySymB.append (Integrate ( Norm (self.gfB.trans -self.gfB), self.mesh ))
         self.energyE.append (sqrt(InnerProduct((self.massE.mat * self.gfE.vec),self.gfE.vec) ) )
-        self.energyB.append (sqrt(InnerProduct((self.massB.mat * self.gfB.vec),self.gfB.vec) ) )
-        self.energyv.append (sqrt(InnerProduct((self.massv.mat * self.gfv.vec),self.gfv.vec) ) )
-    def PlotEnergy(self):
-        plt.plot(self.energyTraceE, label='TraceE')
-        plt.plot(self.energySymB, label='SymB')
+        if not self.divfree :
+            self.energyv.append (sqrt(InnerProduct((self.massv.mat * self.gfv.vec),self.gfv.vec) ) )
+            self.energyB.append (sqrt(InnerProduct((self.massB.mat * self.gfB.vec),self.gfB.vec) ) )
+        else :
+            self.energyB.append (sqrt(InnerProduct((self.massB * self.gfB.vec),self.gfB.vec) ) )
+
+        # print the energy
+        # print ("TraceE: ", self.energyTraceE[-1])
+        # print ("SymB: ", self.energySymB[-1])
+        # print ("E: ", self.energyE[-1])
+        # print ("B: ", self.energyB[-1])
+        # if not self.divfree :
+        #     print ("v: ", self.energyv[-1])
+
+
+    def PlotEnergy(self, **kwargs):
+        plt.figure(1)
         plt.plot(self.energyE, label='E')
         plt.plot(self.energyB, label='B')
-        plt.plot(self.energyv, label='v')
+        if not self.divfree :
+            plt.plot(self.energyv, label='v')
         # plot sum of (E^2 and B^2)^1/2
         plt.plot([sqrt(self.energyE[i]**2 + self.energyB[i]**2) for i in range(len(self.energyE))], label='E+B')
+        plt.plot(self.energyTraceE, label='TraceE')
+        plt.plot(self.energySymB, label='SymB')
         plt.legend()
+        if kwargs.get("save", False):
+            dirname = kwargs.get("dirname", "")
+            figname = kwargs.get("figname", "")
+            plt.savefig(dirname + figname + ".png" )
         plt.show()
 
 
-def main():
-        
-        mesh= Mesh(unit_cube.GenerateMesh(maxh=0.1))
-        
-        t = 0
-        tend = 1
-        dt = 0.001
-
-        eb = EinsteinBianchi(mesh, order=2)
-        eb.SetInitialCondition()
-        
-        Draw (eb.gfE, mesh, "E")
-        input("Press any key...")
-        #Draw (Norm(Norm(eb.gfB)), mesh, "B")
-        #Draw (Norm(eb.gfv), mesh, "v")
-        eb.TrachEnergy()
-
-        while t < tend:
-            t += dt
-            eb.TimeStep(dt)
-            eb.TrachEnergy()
-            Draw (eb.gfE, mesh, "E")
-            #Draw (Norm(eb.gfB), mesh, "B")
-            #Draw (Norm(eb.gfv), mesh, "v")
-            
-            # print time in percent and the energies to the 4th decimal place
-            print(" t:", int(100*t/tend) , "% " , "E: {:.4f} B: {:.4f} v: {:.4f}".format(eb.energyE[-1], eb.energyB[-1], eb.energyv[-1])
-                   , "TraceE: {:.4f} SymB: {:.4f}".format(eb.energyTraceE[-1], eb.energySymB[-1]), end="\r")
-        eb.PlotEnergy()
-
-if __name__ == "__main__":
-    with TaskManager(): main()
