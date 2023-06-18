@@ -28,7 +28,7 @@ def main():
         tend = 0.1
         dt = 0.01
 
-        eb = EinsteinBianchi(mesh, order=2, nonassemble=True)
+        eb = EinsteinBianchi(mesh, order=2, iterative=True)
         eb.SetInitialCondition()
 
 
