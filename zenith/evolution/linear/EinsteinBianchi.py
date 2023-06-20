@@ -7,6 +7,7 @@ from ngsolve.la import EigenValues_Preconditioner
 import numpy as np
 
 
+from netgen.csg import *
 
 
 from ngsolve.internal import visoptions
@@ -48,10 +49,44 @@ def Trace(gfu): return CF((gfu[0,0]+gfu[1,1]+gfu[2,2]))
 # define the class for the Einstein Bianchi equations
 class EinsteinBianchi:
     """
+    Creates the linearized Einstein Bianchi equations. 
+    input:
+    - mesh [Mesh]: the mesh
+    - order [int]: the order of the finite element space, default 2
+    - dirichlet [string]: the dirichlet boundary condition, default ""
+    - condense [bool]: if True, condense the system with Schur complement, default False
+    - nonassemble [bool]: if True, do not assemble the RHS matrices, default False
+    - iterative [bool]: if True, use iterative solver, default False
+    - divfree [bool]: if True, impose a projection into divvergence free space, default False
+    - preconditioner [string]: the preconditioner to use, default "direct"
+    - print [bool]: if True, print the informations to schreen, default True
+    - visualize [bool]: if True, visualize the solution, default False
+    - bonus_intorder [int]: the integration order for the bonus terms, default 0
+
+    attributes:
+    - all the input attributes
+    - all the finite element spaces
+    - all the grid functions
+    - all the trial and test functions
+    - all the bilinear forms
+    - 
+
     This class creates the linearized Einstein Bianchi equations with the variables:
-    - Hcc: the curl of the electric field
-    - Hcd: the curl of the magnetic field
-    - Hd: the divergence of the magnetic field
+    - Hcc: E electric Weyl field
+    - Hcd: B magnetic Weyl field
+    - Hd: v auxiliary field (divergence of the magnetic field)
+
+    The equations are:
+    - E_t = curl(B) 
+    - B_t = -curl(E)
+    - div(B) = 0
+    - div(E) = 0
+
+    The continuous setting impose E, B to be STD (symmetric traceless divergence-free) tensors,
+    dropping the requirement of div(E) = 0. This is done by adding a Lagrange multiplier v
+    - E_t = curl(B) 
+    - v_t = -div(E)
+    - B_t = -curl(E) + grad(v)
     """
     
     def __init__(self, mesh, **kwargs):
@@ -62,6 +97,16 @@ class EinsteinBianchi:
         self.nonassemble = kwargs.get("nonassemble", False)
         self.iterative = kwargs.get("iterative", False)
         self.divfree = kwargs.get("divfree", False)
+
+        # if print then print the parameters
+        if kwargs.get("print", True):
+            print("\nEinsteinBianchi parameters:")
+            print("- order      : ", self.order)
+            print("- dirichlet  : ", self.dirichlet)
+            print("- condense   : ", self.condense)
+            print("- nonassemble: ", self.nonassemble)
+            print("- iterative  : ", self.iterative)
+            print("- divfree    : ", self.divfree)
 
         # mesh and finite element spaces
         self.mesh = mesh
@@ -204,12 +249,15 @@ class EinsteinBianchi:
             self.massv = BilinearForm(InnerProduct(self.v,self.dv)*dx).Assemble()
             self.massvinv = self.massv.mat.Inverse(inverse="sparsecholesky")
 
-
-
-    def SetInitialCondition(self, **kwargs):
+    def SetInitialCondition(self, E0 = None, B0 = None,  **kwargs):
+        print("Set initial conditions")
         peak = exp(-((x)**2+(y)**2+(z)**2)/0.5**2 )
-        self.gfE.Set ( ((peak, 0,0), (0,0,0), (0,0,-peak) ))     
-        #self.gfB.Set ( ((0,0,-peak), (0,0,0), (-peak,0,0) ))
+        if E0 is None:
+            E0 =  ((peak, 0,0), (0,0,0), (0,0,-peak) )
+        if B0 is None:  
+            B0 =  ((0,0,0), (0,0,peak), (0,-peak,0) )
+        self.gfE.Set ( E0 , bonus_intorder=kwargs.get("bonus_intorder", 0), dual = kwargs.get("dual", False))     
+        self.gfB.Set ( B0 , bonus_intorder=kwargs.get("bonus_intorder", 0) , dual = kwargs.get("dual", False))
 
     def TimeStep(self, dt, **kwargs):
         # tend = 5 * dt
@@ -219,16 +267,15 @@ class EinsteinBianchi:
 
         else : #if self.nonassemble :
             self.gfE.vec.data += -dt * self.massEinv@self.matcurl * self.gfB.vec
-            self.gfv.vec.data += -dt * self.massvinv@self.matdiv * self.gfB.vec
-            hv = self.matcurlT * self.gfE.vec + self.matdivT * self.gfv.vec
+            self.gfv.vec.data += dt * self.massvinv@self.matdiv * self.gfB.vec
+            hv = self.matcurlT * self.gfE.vec - self.matdivT * self.gfv.vec
             self.gfB.vec.data += dt * self.massBinv * hv
         #else :
         #    self.gfE.vec.data += -dt * self.massEinv@self.bfcurlT.mat.T * self.gfB.vec
         #    self.gfv.vec.data += -dt * self.massvinv@self.bfdiv.mat * self.gfB.vec
         #    hv = self.bfcurlT.mat * self.gfE.vec + self.bfdiv.mat.T * self.gfv.vec
         #    self.gfB.vec.data += dt * self.massBinv * hv
-        #self.gfB.vec.data += dt * self.massBinvSchur * (self.bfcurlT.mat * self.gfE.vec + self.bfdiv.mat.T * self.gfv.vec)
-        
+        #self.gfB.vec.data += dt * self.massBinvSchur * (self.bfcurlT.mat * self.gfE.vec + self.bfdiv.mat.T * self.gfv.vec)  
   
     def PlotEigenvalues(self):
         print (EigenValues_Preconditioner(self.matE, self.preE).NumPy())
@@ -253,7 +300,6 @@ class EinsteinBianchi:
         # if not self.divfree :
         #     print ("v: ", self.energyv[-1])
 
-
     def PlotEnergy(self, **kwargs):
         plt.figure(1)
         plt.plot(self.energyE, label='E')
@@ -271,4 +317,76 @@ class EinsteinBianchi:
             plt.savefig(dirname + figname + ".png" )
         plt.show()
 
+    def Draw(self):
+        Draw(self.gfE,self.mesh, "E")
+        Draw(self.gfB,self.mesh, "B")
+        if not self.divfree :
+            Draw(self.gfv, self.mesh, "divB")
+
+
+
+def main():
+
+    geo = CSGeometry()
+    geo.Add (Sphere (Pnt(0,0,0), 1))
+
+    mesh = Mesh(geo.GenerateMesh(maxh=0.2))
+
+    eb = EinsteinBianchi(mesh, bonus_intorder=10, condense = True)
+
+    #E00 = 0
+    #E01 = (-3200*z + 40*(40*z - 20.0)*(40*(y - 0.5)**2 - 1) + 40*(40*z - 20.0)*(40*(z - 0.5)**2 - 1) + 1600.0)*exp(-20*(x - 0.5)**2 - 20*(y - 0.5)**2 - 20*(z - 0.5)**2)
+    #E02 = (3200*y - 40*(40*y - 20.0)*(40*(y - 0.5)**2 - 1) - 40*(40*y - 20.0)*(40*(z - 0.5)**2 - 1) - 1600.0)*exp(-20*(x - 0.5)**2 - 20*(y - 0.5)**2 - 20*(z - 0.5)**2)
+    #E10 = (-4800*z + (y - 0.5)**2*(64000*z - 32000.0) + 40*(40*z - 20.0)*(40*(z - 0.5)**2 - 1) + 2400.0)*exp(-20*(x - 0.5)**2 - 20*(y - 0.5)**2 - 20*(z - 0.5)**2)
+    #E11 = -2*(40*x - 20.0)*(40*y - 20.0)*(40*z - 20.0)*exp(-20*(x - 0.5)**2 - 20*(y - 0.5)**2 - 20*(z - 0.5)**2)
+    #E12 = (-1600*x - 40*(40*x - 20.0)*(40*(z - 0.5)**2 - 1) + (64000*x - 32000.0)*(y - 0.5)**2 + 800.0)*exp(-20*(x - 0.5)**2 - 20*(y - 0.5)**2 - 20*(z - 0.5)**2)
+    #E20 = (4800*y + (32000.0 - 64000*y)*(z - 0.5)**2 - 40*(40*y - 20.0)*(40*(y - 0.5)**2 - 1) - 2400.0)*exp(-20*(x - 0.5)**2 - 20*(y - 0.5)**2 - 20*(z - 0.5)**2)
+    #E21 = (1600*x + (32000.0 - 64000*x)*(z - 0.5)**2 + 40*(40*x - 20.0)*(40*(y - 0.5)**2 - 1) - 800.0)*exp(-20*(x - 0.5)**2 - 20*(y - 0.5)**2 - 20*(z - 0.5)**2)
+    #E22 = 2*(40*x - 20.0)*(40*y - 20.0)*(40*z - 20.0)*exp(-20*(x - 0.5)**2 - 20*(y - 0.5)**2 - 20*(z - 0.5)**2)
+    E00 = 0
+    E01 = 16*sqrt(610)*z*(5*y**2 + 5*z**2 - 1)*exp(-10*x**2 - 10*y**2 - 10*z**2)/61
+    E02 = 16*sqrt(610)*y*(-5*y**2 - 5*z**2 + 1)*exp(-10*x**2 - 10*y**2 - 10*z**2)/61
+    E10 = 16*sqrt(610)*z*(5*y**2 + 5*z**2 - 1)*exp(-10*x**2 - 10*y**2 - 10*z**2)/61
+    E11 = -160*sqrt(610)*x*y*z*exp(-10*x**2 - 10*y**2 - 10*z**2)/61
+    E12 = 80*sqrt(610)*x*(y**2 - z**2)*exp(-10*x**2 - 10*y**2 - 10*z**2)/61
+    E20 = 16*sqrt(610)*y*(-5*y**2 - 5*z**2 + 1)*exp(-10*x**2 - 10*y**2 - 10*z**2)/61
+    E21 = 80*sqrt(610)*x*(y**2 - z**2)*exp(-10*x**2 - 10*y**2 - 10*z**2)/61
+    E22 = 160*sqrt(610)*x*y*z*exp(-10*x**2 - 10*y**2 - 10*z**2)/61
+    #E00 = 0
+    #E01 = (-8.0e-8*z + (2*z - 1.0)*(4.0e-8*(y - 0.5)**2 - 2.0e-8) + (2*z - 1.0)*(4.0e-8*(z - 0.5)**2 - 2.0e-8) + 4.0e-8)*exp(-(x - 0.5)**2 - (y - 0.5)**2 - (z - 0.5)**2)
+    #E02 = (8.0e-8*y - (2*y - 1.0)*(4.0e-8*(y - 0.5)**2 - 2.0e-8) - (2*y - 1.0)*(4.0e-8*(z - 0.5)**2 - 2.0e-8) - 4.0e-8)*exp(-(x - 0.5)**2 - (y - 0.5)**2 - (z - 0.5)**2)
+    #E10 = (-1.2e-7*z + (2.0e-8*y - 1.0e-8)*(2*y - 1.0)*(2*z - 1.0) + (2*z - 1.0)*(4.0e-8*(z - 0.5)**2 - 2.0e-8) + 6.0e-8)*exp(-(x - 0.5)**2 - (y - 0.5)**2 - (z - 0.5)**2)
+    #E11 = -(2*z - 1.0)*((2.0e-8*x - 1.0e-8)*(2*y - 1.0) + (2*x - 1.0)*(2.0e-8*y - 1.0e-8))*exp(-(x - 0.5)**2 - (y - 0.5)**2 - (z - 0.5)**2)
+    #E12 = (-4.0e-8*x + (8.0e-8*x - 4.0e-8)*(y - 0.5)**2 - (2*x - 1.0)*(4.0e-8*(z - 0.5)**2 - 2.0e-8) + 2.0e-8)*exp(-(x - 0.5)**2 - (y - 0.5)**2 - (z - 0.5)**2)
+    #E20 = (1.2e-7*y + (4.0e-8 - 8.0e-8*y)*(z - 0.5)**2 - (2*y - 1.0)*(4.0e-8*(y - 0.5)**2 - 2.0e-8) - 6.0e-8)*exp(-(x - 0.5)**2 - (y - 0.5)**2 - (z - 0.5)**2)
+    #E21 = (4.0e-8*x + (4.0e-8 - 8.0e-8*x)*(z - 0.5)**2 + (2*x - 1.0)*(4.0e-8*(y - 0.5)**2 - 2.0e-8) - 2.0e-8)*exp(-(x - 0.5)**2 - (y - 0.5)**2 - (z - 0.5)**2)
+    #E22 = (2*z - 1.0)*((2.0e-8*x - 1.0e-8)*(2*y - 1.0) + (2*x - 1.0)*(2.0e-8*y - 1.0e-8))*exp(-(x - 0.5)**2 - (y - 0.5)**2 - (z - 0.5)**2)
+    E = CoefficientFunction( ( (E00,E01,E02), (E10,E11,E12), (E20,E21,E22) ) , dims=(3,3) )
+    B = CoefficientFunction( ( (0,0,0), (0,0,0), (0,0,0) ) , dims=(3,3) )
+    #B = CoefficientFunction( ( (0,0,- cos(y-t)), (0,0,0), (- cos(y-t),0,0) ) , dims=(3,3) )
+    eb.SetInitialCondition(E,B, dual=True)
+
+    eb.Draw()
+    input("Press any key...")
+    tend = 1
+    t = 0
+    dt = 0.01
+    
+    
+    while t < tend:
+        t += dt
+        eb.TimeStep(dt)
+        eb.TrachEnergy()
+        eb.Draw()
+        print("t = ", int(t/tend*100) ,"%" , end='\r')
+
+    eb.PlotEnergy()
+
+
+    
+
+    
+
+if __name__ == "__main__":
+    with TaskManager(): main()
 
