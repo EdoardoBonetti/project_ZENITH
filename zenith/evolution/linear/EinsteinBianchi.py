@@ -97,6 +97,7 @@ class EinsteinBianchi:
         self.nonassemble = kwargs.get("nonassemble", False)
         self.iterative = kwargs.get("iterative", False)
         self.divfree = kwargs.get("divfree", False)
+        self.inverse = kwargs.get("inverse", "sparsecholesky" )
 
         # if print then print the parameters
         if kwargs.get("print", True):
@@ -120,12 +121,14 @@ class EinsteinBianchi:
         # define the grid functions
         self.gfE = GridFunction(self.fescc)
         self.gfB = GridFunction(self.fescd)
-        self.gfv = GridFunction(self.fesd)
+        if not self.divfree:
+            self.gfv = GridFunction(self.fesd)
   
 
         self.gfB.vec[:] = 0.0
         self.gfE.vec[:] = 0.0
-        self.gfv.vec[:] = 0.0
+        if not self.divfree:
+            self.gfv.vec[:] = 0.0
 
         self.energyB = []
         self.energyE = []
@@ -149,86 +152,73 @@ class EinsteinBianchi:
             self.bfcurl = BilinearForm(CurlTHcc2Hcd(self.dE, self.fescd.TrialFunction()), nonassemble= self.nonassemble)
             self.bfdivT = BilinearForm(DivHcdHd(self.dB, self.v), nonassemble= self.nonassemble)
             self.matcurl = self.bfcurl.mat
-            self.matdiv = self.bfdiv.mat
-            self.matcurlT = self.bfcurlT.mat
             self.matdivT = self.bfdivT.mat
 
         if self.nonassemble == False:
             self.bfcurlT.Assemble()
             self.bfdiv.Assemble()
-            self.matcurlT = self.bfcurlT.mat
-            self.matdiv = self.bfdiv.mat
             self.matcurl = self.bfcurlT.mat.T
             self.matdivT = self.bfdiv.mat.T
-            
-
+        
+        self.matdiv = self.bfdiv.mat
+        self.matcurlT = self.bfcurlT.mat
 
         # dont know if this is needed
         for e in mesh.edges:
             for dof in self.fescc.GetDofNrs(e):
                 self.fescc.couplingtype[dof] = COUPLING_TYPE.WIREBASKET_DOF
 
-        if self.condense and self.iterative :
-            # mass matrix for the electric field
-            self.massE = BilinearForm(InnerProduct(self.E,self.dE)*dx, condense=True)
+        self.massE = BilinearForm(InnerProduct(self.E,self.dE)*dx, condense=self.condense)
+        self.massB = BilinearForm(InnerProduct(self.B,self.dB)*dx, condense=self.condense)
+        if self.divfree:
+            self.massv = BilinearForm(InnerProduct(self.v,self.dv)*dx, condense=self.condense)
+        
+        matE = self.massE.mat
+        matB = self.massB.mat
+        if not self.divfree:
+            matv = self.massv.mat
+
+        if self.iterative :            # mass matrix for the electric field
             self.preE = Preconditioner(self.massE, "local")#, block=True, blocktype="edgepatch")
-            self.massE.Assemble()
-            matE = self.massE.mat
+            self.preB = Preconditioner(self.massB, "local")#, block=True, blocktype="edgepatch")
+            if self.divfree:
+                self.prev = Preconditioner(self.massv, "local")#, block=True, blocktype="edgepatch")
+
+        self.massE.Assemble()
+        self.massB.Assemble()
+        if not self.divfree:
+            self.massv.Assemble()
+
+        if self.iterative and self.condense:
             self.massEinvSchur = CGSolver (matE, self.preE, printrates = False)
+            self.massBinvSchur = CGSolver (matB, self.preB, printrates = False)
+            if not self.divfree:
+                self.massvinvSchur = CGSolver (matv, self.prev, printrates = False)
+
             Eext = IdentityMatrix()+self.massE.harmonic_extension
             EextT = IdentityMatrix()+self.massE.harmonic_extension_trans
             self.massEinv =  Eext @ self.massEinvSchur @ EextT + self.massE.inner_solve
 
-            # mass matrix for the magnetic field
-            self.massB = BilinearForm(InnerProduct(self.B,self.dB)*dx, condense=True)
-            self.preB = Preconditioner(self.massB, "bddc", block=True, blocktype="edgepatch")
-            self.massB.Assemble()
-            self.matB = self.massB.mat
-            self.massBinvSchur = CGSolver (self.matB, self.preB, printrates = False)
-            ext = IdentityMatrix()+self.massB.harmonic_extension
-            extT = IdentityMatrix()+self.massB.harmonic_extension_trans
-            self.massBinv =  ext @ self.massBinvSchur @ extT + self.massB.inner_solve
+            Bext = IdentityMatrix()+self.massB.harmonic_extension
+            BextT = IdentityMatrix + self.massB.harmonic_extension_trans
+            self.massBinv =  Bext @ self.massBinvSchur @ BextT + self.massB.inner_solve
 
-            # mass matrix for the divergence field
-            self.massv = BilinearForm(InnerProduct(self.v,self.dv)*dx, condense=True).Assemble()
-            self.matv = self.massv.mat
-            self.prev = self.matv.CreateSmoother(self.fesd.FreeDofs(True), GS=False)
-            self.massvinvSchur = CGSolver (self.matv, self.prev, printrates = False)
-            self.Vext = IdentityMatrix()+self.massv.harmonic_extension
-            self.VextT = IdentityMatrix()+self.massv.harmonic_extension_trans
-            self.massvinv =  self.Vext @ self.massvinvSchur @ self.VextT + self.massv.inner_solve
+            if not self.divfree:
+                vext = IdentityMatrix()+self.massv.harmonic_extension
+                vextT = IdentityMatrix + self.massv.harmonic_extension_trans
+                self.massvinv =  vext @ self.massvinvSchur @ vextT + self.massv.inner_solve
 
-        elif self.iterative :
-            # mass matrix for the electric field
-            self.massE = BilinearForm(InnerProduct(self.E,self.dE)*dx)
-#            self.preE = Preconditioner(self.massE, "bddc", block=True, blocktype="edgepatch")
-            self.preE = Preconditioner(self.massE, "local")#, block=True, blocktype="edgepatch")
-            self.massE.Assemble()
-            self.matE = self.massE.mat
+        elif self.iterative and not self.condense:
             self.massEinv = CGSolver (self.matE, self.preE, printrates = False)
-
-            # mass matrix for the magnetic field
-            self.massB = BilinearForm(InnerProduct(self.B,self.dB)*dx)
-#            self.preB = Preconditioner(self.massB, "bddc", block=True, blocktype="edgepatch")
-            self.preB = Preconditioner(self.massB, "local")#, block=True, blocktype="edgepatch") 
-            self.massB.Assemble()
-            self.matB = self.massB.mat
             self.massBinv = CGSolver (self.matB, self.preB, printrates = False)
-
-            # mass matrix for the divergence field
-            self.massv = BilinearForm(InnerProduct(self.v,self.dv)*dx)
-            #self.prev = Preconditioner(self.massv, "bddc", block=True, blocktype="edgepatch")
-            self.prev = Preconditioner(self.massv, "local")#, block=True, blocktype="edgepatch")
-            self.massv.Assemble()
-            self.matv = self.massv.mat
-            self.massvinv = CGSolver (self.matv, self.prev, printrates = False)
-
+            if not self.divfree:
+                self.massvinv = CGSolver (self.matv, self.prev, printrates = False)
+             
         elif self.divfree :
-            print("divfree method")
-            self.massE = BilinearForm(InnerProduct(self.E,self.dE)*dx).Assemble()
             self.massH = BilinearForm(self.fescd_d)
             self.massH += InnerProduct(self.B,self.dB)*dx + DivHcdHd(self.B,self.dv) + DivHcdHd(self.dB,self.v) - 1e-3*self.v*self.dv*dx - div(self.v)*div(self.dv)*dx
             self.massH.Assemble()
+            
             self.massEinv = self.massE.mat.Inverse(inverse="sparsecholesky")
             self.massHinv = self.massH.mat.Inverse(inverse="sparsecholesky")
             self.resB = self.fescd_d.restrictions[0]
@@ -248,6 +238,17 @@ class EinsteinBianchi:
             # mass matrix for the divergence field
             self.massv = BilinearForm(InnerProduct(self.v,self.dv)*dx).Assemble()
             self.massvinv = self.massv.mat.Inverse(inverse="sparsecholesky")
+
+        self.massE.Assemble()
+        self.massB.Assemble()
+        if self.divfree : self.massv.Assemble()
+
+
+
+
+
+
+
 
     def SetInitialCondition(self, E0 = None, B0 = None,  **kwargs):
         print("Set initial conditions")
