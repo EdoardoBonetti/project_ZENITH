@@ -9,6 +9,20 @@ n = specialcf.normal(3)
 Cn = CF( (0, n[2], -n[1], -n[2], 0, n[0], n[1], -n[0], 0) , dims=(3,3) )
 Pn = OuterProduct(n,n)
 Qn = Id(3) - Pn     
+t = specialcf.tangential(3, True)
+bbndtang  = specialcf.EdgeFaceTangentialVectors(3)
+tef1 = bbndtang[:,0]
+tef2 = bbndtang[:,1]
+nu1 = Cross(tef1,t)
+nu2 = Cross(tef2,t)
+
+def IncHcc2Hcc(g, dg, **kwargs):
+    return InnerProduct(curl(g), curl(dg).trans)*dx \
+        + (curl(g)*n) * Cross (dg*n, n) * dx(element_vb=BND) \
+        + (curl(dg)*n) * Cross (g*n, n) * dx(element_vb=BND) \
+        + (g[nu1,t]*dg[t,tef1]-g[nu2,t]*dg[t,tef2])*dx(element_vb=BBND)
+
+
 
 
 def TCurHcc2Hcd(E,dH, **kwargs):
