@@ -57,7 +57,8 @@ class BowenYork:
         self.W = CF((0)) # not yet computed, is computed in the Solve() function
 
 
-    def Solve(self ,FES ,  inverse = "pardiso"):
+    def Solve(self ,FES ,  **kwargs):
+        inverse = kwargs.get("inverse", "sparsecholesky")
         # in the space the outer boundary must be called "outer" and needs to ne Neumann
         u , v = FES.TnT()
         a = BilinearForm(FES)
