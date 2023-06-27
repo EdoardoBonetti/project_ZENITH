@@ -121,15 +121,17 @@ class EinsteinBianchi:
         # define the grid functions
         self.gfE = GridFunction(self.fescc)
         self.gfB = GridFunction(self.fescd)
-        if not self.divfree:
-            self.gfv = GridFunction(self.fesd)
+        self.gfv = GridFunction(self.fesd)
+        if self.divfree:
+            self.gfBv = GridFunction(self.fescd_d)
   
 
         self.gfB.vec[:] = 0.0
         self.gfE.vec[:] = 0.0
-        if not self.divfree:
-            self.gfv.vec[:] = 0.0
-
+        self.gfv.vec[:] = 0.0
+        if self.divfree:
+            self.gfBv.vec[:] = 0.0
+            
         self.energyB = []
         self.energyE = []
         self.energyv = []
@@ -170,13 +172,11 @@ class EinsteinBianchi:
 
         self.massE = BilinearForm(InnerProduct(self.E,self.dE)*dx, condense=self.condense)
         self.massB = BilinearForm(InnerProduct(self.B,self.dB)*dx, condense=self.condense)
-        if self.divfree:
+        if not self.divfree:
             self.massv = BilinearForm(InnerProduct(self.v,self.dv)*dx, condense=self.condense)
         
-        matE = self.massE.mat
-        matB = self.massB.mat
-        if not self.divfree:
-            matv = self.massv.mat
+#        if not self.divfree:
+#            matv = self.massv.mat
 
         if self.iterative :            # mass matrix for the electric field
             self.preE = Preconditioner(self.massE, "local")#, block=True, blocktype="edgepatch")
@@ -186,8 +186,11 @@ class EinsteinBianchi:
 
         self.massE.Assemble()
         self.massB.Assemble()
+        matE = self.massE.mat
+        matB = self.massB.mat
         if not self.divfree:
             self.massv.Assemble()
+            matv = self.massv.mat
 
         if self.iterative and self.condense:
             self.massEinvSchur = CGSolver (matE, self.preE, printrates = False)

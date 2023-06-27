@@ -85,7 +85,7 @@ def DefaultMesh(
         geo.Add(sphere_outer- sphere_inner)
 
 
-        mesh = Mesh(geo.GenerateMesh(maxh=h*R/2, grading=grading))
+        mesh = Mesh(geo.GenerateMesh(maxh=h*(R+2)/2, grading=grading))
         mesh.Curve(1)
 
         return mesh
