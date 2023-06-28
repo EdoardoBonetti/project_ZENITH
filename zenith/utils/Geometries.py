@@ -40,7 +40,7 @@ def DefaultMesh(
                                 the outer one is the outer sphere emulating the infinity with boundary "outer"
     """
 
-    print (kwargs)
+    #print (kwargs)
 
     if "grading" in kwargs:
         grading = kwargs["grading"]
