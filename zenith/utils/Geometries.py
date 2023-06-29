@@ -16,16 +16,63 @@ from ngsolve.solvers import *
 # viewoptions.clipping.enable = 1
 
 
+
+
 def DefaultMesh(
         h : float =0.15, 
+        r : float = 1,
+        H : float =10,
         R : float =20, 
-        small_rad : float = 1,
         **kwargs : dict 
         ) -> Mesh:
     
     """
-    h [float] : the mesh size in the interior sphere
-    R [float] : the radius of the outer sphere
+    h [float] : mesh size of inner sphere
+    r [float] : inner radious
+    H [float] : mesh size of outer sphere
+    R [float] : outer radious
+    kwargs : 
+        grading [float] : the grading of the mesh   
+
+
+    """
+
+    #print (kwargs)
+    grading = kwargs.get("grading", 0.9)
+    
+        # create the mesh in whick the inner sphere contains all the black holes
+    geo = CSGeometry()
+    totmass = 0
+    dist = 0
+
+    x_cm , y_cm, z_cm = 0,0,0
+    sphere_inner = Sphere(Pnt(0,0,0), r).maxh(h)
+    sphere_inner.bc("inner")
+    geo.Add(sphere_inner)
+    sphere_outer = Sphere(Pnt(x_cm,y_cm,z_cm),R)
+    sphere_outer.bc("outer")
+    geo.Add(sphere_outer- sphere_inner)
+    
+    mesh = Mesh(geo.GenerateMesh(maxh=H, grading=grading))
+    mesh.Curve(kwargs.get("curve_order",1))
+
+    return mesh
+
+
+def AdaptMesh(
+        h : float =0.15, 
+        r : float = 1,
+        H : float =10,
+        R : float =20, 
+        **kwargs : dict 
+        ) -> Mesh:
+    
+    """
+    h [float] : mesh size of inner spheres
+    r [float] : inner radious
+    H [float] : mesh size of outer sphere
+    R [float] : outer radious
+
     kwargs : 
         grading [float] : the grading of the mesh
         blackholes [list] : a list of BlackHole objects
@@ -93,10 +140,10 @@ def DefaultMesh(
     else:
         # create a mesh
         geo = CSGeometry()
-        sphere_inner = Sphere(Pnt(0,0,0),small_rad ).maxh(h)
+        sphere_inner = Sphere(Pnt(0,0,0), r ).maxh(h)
         sphere_inner.bc("inner")
         geo.Add(sphere_inner)
-        sphere_outer = Sphere(Pnt(0,0,0),R)
+        sphere_outer = Sphere(Pnt(0,0,0), R )
         sphere_outer.bc("outer")
         geo.Add(sphere_outer- sphere_inner)
         mesh = Mesh(geo.GenerateMesh(maxh=h*R/2, grading=grading))
@@ -105,3 +152,10 @@ def DefaultMesh(
         return mesh
 
 
+if __name__ == "__main__":
+    # test the DefaultMesh function
+    mesh = DefaultMesh(grading =1)
+    #Draw(mesh)
+    f = GridFunction(H1(mesh,order=0))
+    f.Set((x))
+    Draw(f, mesh, "f")
