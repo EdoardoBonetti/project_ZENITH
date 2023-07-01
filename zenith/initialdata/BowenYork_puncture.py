@@ -21,7 +21,7 @@ viewoptions.clipping.nz= -1
 viewoptions.clipping.enable = 1
 
 
-sys.path.append(os.getcwd())
+sys.path.append("C:\\Users\\User\\OneDrive\\Desktop\\project_ZENITH")
 from zenith.utils.Geometries import *
 from zenith.utils.CompactObjects import *
 
@@ -30,14 +30,38 @@ from zenith.utils.CompactObjects import *
 
 
 class BowenYork:
+    """
+    This class creates the initial data for the Bowen York initial value problem
+
+    Parameters
+    ----------
+    BHs : list of BlackHole objects
+    conformal_metric : ngsolve.CoefficientFunction
+        the conformal metric, if not specified it is set to the Minkowski metric
+
+    Global 
+    ----------
+    Xi : ngsolve.CoefficientFunction
+        the conformal factor
+    Aij : ngsolve.CoefficientFunction
+        the extrinsic curvature
+    b : ngsolve.CoefficientFunction
+        the trace of the extrinsic curvature
+    W : ngsolve.CoefficientFunction
+        the conformal factor of the extrinsic curvature
+
+    Attributes
+    ----------
+    BHs : list of BlackHole objects
+    h : ngsolve.CoefficientFunction
+        the conformal metric
+    """
 
     def __init__(self, BHs, **kwargs):
 
         # list of black holes
         self.BHs = BHs
 
-        # conformal metric
-        # if in kwargs there is a conformal metric, we use it, otherwise we set it to the flat metric
         if "conformal_metric" in kwargs:
             self.h = kwargs["conformal_metric"]
         else:
@@ -50,15 +74,18 @@ class BowenYork:
         self.Xi = 1/cf_invXi
         
         self.Aij = CF((0,0,0, 0,0,0, 0,0,0), dims = (3,3)) # Total extrinsic curvature
-        for BH in BHs:    self.Aij += BH.Aij
+        for BH in BHs: self.Aij += BH.Aij
 
         self.b = -InnerProduct(self.Aij, self.Aij)*self.Xi**7 /8
 
         self.W = CF((0)) # not yet computed, is computed in the Solve() function
 
 
-    def Solve(self ,FES ,  **kwargs):
+    def Solve(self, mesh,  **kwargs):
         inverse = kwargs.get("inverse", "sparsecholesky")
+        order = kwargs.get("order", 1)
+        
+        FES = H1
         # in the space the outer boundary must be called "outer" and needs to ne Neumann
         u , v = FES.TnT()
         a = BilinearForm(FES)
@@ -89,21 +116,20 @@ def main():
     
     # create a mesh
     h = 0.2
+    r = 1
+    H = 2
     R = 6
-    order = 3
+    order = 2
     kwargs = {"bonus_intorder": 10}
 
-    mesh = DefaultMesh(h=h, R=R)
-    h1 = H1(mesh, order = order)
-
-    # create a list of black holes
-
     # BH1
-    po1 =  CF((0,0,0))
-    lin1 = CF((1,0,0))
-    ang1 = CF((0,0,0))
-    mass1 = CF((1))
+    po1 =  (0,0,0)
+    lin1 = (1,0,0)
+    ang1 = (0,0,0)
+    mass1 =1
     BH1 = BlackHole(mass1, po1, lin1, ang1 )
+    BHs = [BH1]
+    mesh = MeshBlackHoles(BHs, h=h, R=R)
 
     # BH2
     #po2 =  CF((-1,0,0))
@@ -113,11 +139,15 @@ def main():
     #BH2 = BlackHole(mass2, lin2, ang2, po2)
 
     # list: BHs
-    BHs = [BH1]#,BH2]
+    #,BH2]
+    #mesh = MeshBlackHoles(BHs, h=h, R=R)
+
+    input("Press any key to continue")
+
 
     # solve the problem
     bowenyork = BowenYork(BHs) # set up the problem
-    bowenyork.Solve(h1)        # solve the pde
+    bowenyork.Solve()        # solve the pde
     #bowenyork.Draw(mesh)
 
     # create the gridfunctions to store the initial data
