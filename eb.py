@@ -1,8 +1,18 @@
 from netgen.csg import *
-# neccessary imports
+
 from ngsolve import *
 import matplotlib.pyplot as plt
 import numpy as np
+
+from ngsolve.internal import visoptions
+from ngsolve.internal import viewoptions
+
+visoptions.scalfunction='u:0'
+visoptions.clipsolution = 'scal'
+viewoptions.clipping.nx= 0
+viewoptions.clipping.ny= 0
+viewoptions.clipping.nz= -1
+viewoptions.clipping.enable = 1
 
 class BlackHole:
     def __init__(
@@ -54,90 +64,43 @@ class BlackHole:
 
 def DefaultMesh(
         h : float =0.15, 
+        r : float = 1,
+        H : float =10,
         R : float =20, 
-        small_rad : float = 1,
         **kwargs : dict 
-        ):
+        ) -> Mesh:
     
     """
-    h [float] : the mesh size in the interior sphere
-    R [float] : the radius of the outer sphere
+    h [float] : mesh size of inner sphere
+    r [float] : inner radious
+    H [float] : mesh size of outer sphere
+    R [float] : outer radious
     kwargs : 
-        grading [float] : the grading of the mesh
-        blackholes [list] : a list of BlackHole objects
-        adaption [bool] : if True, the mesh is adapted to each black hole
-        
-    returns a mesh for multiple blackholes:
-        if 'adaption'== False : the mesh is the union of two spheres, 
-                                the inner one is the inner sphere with boundary "inner",
-                                the outer one is the outer sphere emulating the infinity with boundary "outer" 
-        if 'adaption'== True : the mesh is the union of multiple spheres (one for each black hole),
-                                the inner one is the inner sphere with boundary "inner",
-                                the outer one is the outer sphere emulating the infinity with boundary "outer"
+        grading [float] : the grading of the mesh   
+
+
     """
 
-
-    if "grading" in kwargs:
-        grading = kwargs["grading"]
-    else:
-        grading = 0.9
-
-    if "blackholes" in kwargs:
-        BHs = kwargs["blackholes"]
-
+    #print (kwargs)
+    grading = kwargs.get("grading", 0.9)
+    
         # create the mesh in whick the inner sphere contains all the black holes
-        geo = CSGeometry()
-        totmass = 0
-        dist = 0
+    geo = CSGeometry()
+    totmass = 0
+    dist = 0
 
-        x_cm , y_cm, z_cm = 0,0,0
-        for BH in BHs:
-            totmass += BH.fl_mass
-            x_cm += BH.fl_mass*BH.fl_pos[0]
-            y_cm += BH.fl_mass*BH.fl_pos[1]
-            z_cm += BH.fl_mass*BH.fl_pos[2]
-            dist = max(dist, sqrt((BH.fl_pos[0]-x_cm)**2 + (BH.fl_pos[1]-y_cm)**2 + (BH.fl_pos[2]-z_cm)**2))
-        x_cm /= totmass
-        y_cm /= totmass
-        z_cm /= totmass
+    x_cm , y_cm, z_cm = 0,0,0
+    sphere_inner = Sphere(Pnt(0,0,0), r).maxh(h)
+    sphere_inner.bc("inner")
+    geo.Add(sphere_inner)
+    sphere_outer = Sphere(Pnt(x_cm,y_cm,z_cm),R)
+    sphere_outer.bc("outer")
+    geo.Add(sphere_outer- sphere_inner)
+    
+    mesh = Mesh(geo.GenerateMesh(maxh=H, grading=grading))
+    mesh.Curve(kwargs.get("curve_order",1))
 
-        if "adaption" in kwargs and kwargs["adaption"] == True:
-            # create the inner sphere for each black hole
-
-            sphere_inner = Sphere(Pnt(BHs[0].fl_pos[0],BHs[0].fl_pos[1],BHs[0].fl_pos[2]),3/2*BHs[0].fl_mass).maxh(h)
-            for BH in BHs[1:len(BHs)]:
-                sphere_inner += Sphere(Pnt(BH.fl_pos[0],BH.fl_pos[1],BH.fl_pos[2]),3/2*BH.fl_mass).maxh(h)
-            sphere_inner.bc("inner")
-            geo.Add(sphere_inner)    
-
-        else:
-            sphere_inner = Sphere(Pnt(x_cm,y_cm,z_cm),3/2*dist).maxh(h)
-            sphere_inner.bc("inner")
-            geo.Add(sphere_inner)
-        
-        sphere_outer = Sphere(Pnt(x_cm,y_cm,z_cm),R)
-        sphere_outer.bc("outer")
-        geo.Add(sphere_outer- sphere_inner)
-
-
-        mesh = Mesh(geo.GenerateMesh(maxh=h*(R+1/R)/2, grading=grading))
-        mesh.Curve(1)
-
-        return mesh
-
-    else:
-        # create a mesh
-        geo = CSGeometry()
-        sphere_inner = Sphere(Pnt(0,0,0),small_rad ).maxh(h)
-        sphere_inner.bc("inner")
-        geo.Add(sphere_inner)
-        sphere_outer = Sphere(Pnt(0,0,0),R)
-        sphere_outer.bc("outer")
-        geo.Add(sphere_outer- sphere_inner)
-        mesh = Mesh(geo.GenerateMesh(maxh=h*R/2, grading=grading))
-        mesh.Curve(1)
-
-        return mesh
+    return mesh
 
 
 
@@ -156,13 +119,13 @@ def Save(name):
     plt.savefig(name+".png", dpi=300)
 
 
-def Eval(h = 0.2, order=1 , t = 0 , tend = 1, dt = 0.001):
+def Eval(h = 0.2, H=0.1, order=1 , t = 0 , tend = 1, dt = 0.001):
     # create  a black hole at the origin
     mass = 1
     bh = BlackHole(mass=mass)
     
     bh_list = [bh]
-    mesh = DefaultMesh(bh_list=bh_list, adaption=False, h=h, R=1, small_rad=0.5, grading=0.9)
+    mesh = DefaultMesh(h=h, R=1, r=0.5, H =H, grading=0.9)
     
     #Draw(mesh, clipping='z')
     
@@ -187,26 +150,31 @@ def Eval(h = 0.2, order=1 , t = 0 , tend = 1, dt = 0.001):
     bfdiv = BilinearForm(DivHcdHd(B, dv)).Assemble()
     
     with TaskManager():
-        massE = BilinearForm(InnerProduct(E,dE)*dx, condense=True)
-        preE = Preconditioner(massE, "bddc", block=True, blocktype="edgepatch")
+        massE = BilinearForm(InnerProduct(E,dE)*dx, condense=True).Assemble()
+        # preE = Preconditioner(massE, "bddc", block=True, blocktype="edgepatch")
+        matE = massE.mat
+        preE = matE.CreateSmoother(fescd.FreeDofs(True), GS=False)
         massE.Assemble()
         matE = massE.mat
         
-        massEinvSchur = CGSolver (matE, preE)
+        massEinvSchur = CGSolver (matE, preE, printrates = False)
         ext = IdentityMatrix()+massE.harmonic_extension
         extT = IdentityMatrix()+massE.harmonic_extension_trans
         massEinv =  ext @ massEinvSchur @ extT + massE.inner_solve
         
     with TaskManager():
         
-        massB = BilinearForm(InnerProduct(B,dB)*dx, condense=True)
-        preB = Preconditioner(massB, "bddc", block=True, blocktype="edgepatch")
-        massB.Assemble()
-        matB = massB.mat    
+        massB = BilinearForm(InnerProduct(B,dB)*dx, condense=True).Assemble()
+        #preB = Preconditioner(massB, "bddc", block=True, blocktype="edgepatch")
+        matB = massB.mat
+        preB = matB.CreateSmoother(fescc.FreeDofs(True), GS=False)
+        #massB.Assemble()
+        #massB.Assemble()
+        #matB = massB.mat    
     
         # preH = matH.CreateSmoother(fescd.FreeDofs(True), GS=False)
     
-        massBinvSchur = CGSolver (matB, preB)
+        massBinvSchur = CGSolver (matB, preB, printrates = False)
         ext = IdentityMatrix()+massB.harmonic_extension
         extT = IdentityMatrix()+massB.harmonic_extension_trans
         massBinv =  ext @ massBinvSchur @ extT + massB.inner_solve
@@ -216,7 +184,7 @@ def Eval(h = 0.2, order=1 , t = 0 , tend = 1, dt = 0.001):
         matv = massv.mat
         prev = matv.CreateSmoother(fesd.FreeDofs(True), GS=False)
         
-        massvinvSchur = CGSolver (matv, prev)
+        massvinvSchur = CGSolver (matv, prev, printrates = False)
         ext = IdentityMatrix()+massv.harmonic_extension
         extT = IdentityMatrix()+massv.harmonic_extension_trans
         massvinv =  ext @ massvinvSchur @ extT + massv.inner_solve
@@ -237,7 +205,7 @@ def Eval(h = 0.2, order=1 , t = 0 , tend = 1, dt = 0.001):
     E = CoefficientFunction( (E00, E01, E02, E10, E11, E12, E20, E21, E22) , dims=(3,3) )
     
     #Draw(Norm(E), mesh, clipping ={ "z":-1})
-    gfE.Set( E, bonus_intorder=2*order+1)
+    gfE.Set( E, bonus_intorder=10)
     t = 0
     # tend = 5 * dt
     #scene = Draw(Norm(gfB), mesh, clipping={"z":-1})
@@ -251,7 +219,7 @@ def Eval(h = 0.2, order=1 , t = 0 , tend = 1, dt = 0.001):
     if os.path.exists(name+".txt"):
         os.remove(name+".txt")
 
-    #scene = Draw(Norm(gfE), mesh, clipping=(0,0,-1,0))
+    scene = Draw(Norm(gfE), mesh, "E")
     input("press")
     while t < tend:
     
@@ -270,7 +238,6 @@ def Eval(h = 0.2, order=1 , t = 0 , tend = 1, dt = 0.001):
             t += dt
             with open(name+".txt", "a") as myfile: 
                 myfile.write(str(t) + ";" + str(energyE[-1]) + ";" + str(energyB[-1]) + ";" +  str(energyv[-1]) + ";" + str(energytrace[-1]) + ";" + str(energySym[-1]) + "\n")
-        # print time in percentage and the firs 4 decimals of the energy 
             print ("t: ", round(t/tend*100, 4), "%"+" E", round(energyE[-1],4), " B", round(energyB[-1],4), " trace", round(energytrace[-1],4), " sym", round(energySym[-1],4), " v", round(energyv[-1],4), end="\r")
             
     #t =0
@@ -279,10 +246,10 @@ def Eval(h = 0.2, order=1 , t = 0 , tend = 1, dt = 0.001):
     #        t += dt 
     #        myfile.write(str(t) + ";" + str(energyE[i]) + ";" + str(energyB[i]) + ";" + str(energytrace[i]) + ";" + str(energySym[i]) + ";" + str(energyv[i]) + "\n")
     
-    Save(name)
+    #Save(name)
 
 if "__main__" == __name__:
     with TaskManager(): 
-        Eval( h = 0.20, order = 1, tend= 10, dt = 0.01)
+        Eval(  h = 0.1, order = 1, tend= 10, dt = 0.1)
 
 
