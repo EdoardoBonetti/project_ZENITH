@@ -11,9 +11,6 @@ from netgen.csg import *
 from ngsolve.solvers import *
 # import the Bowen York solution
 
-import os
-import sys
-sys.path.append(os.getcwd())
 #from utils.Geometries import *
 #from utils.CompactObjects import *
 

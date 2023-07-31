@@ -3,7 +3,8 @@ __all__ = [ 'DefaultMesh',
             'BowenYork',
             'VisualOptions',
             'BSSNPuncture',
-            'EinsteinBianchi'
+            'EinsteinBianchi',
+            'MeshBlackHoles'
     ]
 
 from .utils.Geometries import DefaultMesh
@@ -15,3 +16,5 @@ from .initialdata.BowenYork_puncture import BowenYork
 from .evolution.nonlinear.BSSN_puncture import BSSNPuncture
 
 from .evolution.linear.EinsteinBianchi import EinsteinBianchi 
+
+from .utils.CompactObjects import MeshBlackHoles

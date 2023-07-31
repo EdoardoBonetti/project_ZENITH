@@ -21,8 +21,7 @@ class BlackHole:
         mom: [tuple[float, ...]] the linear momentum of the black hole
         spin: [tuple[float, ...]] the spin of the black hole
         """
-
-
+        
         self.fl_mass = mass
         self.fl_pos  = pos
         self.fl_spin = spin
@@ -32,8 +31,6 @@ class BlackHole:
         self.pos  = CF((pos))
         self.spin = CF((spin))
         self.mom  = CF((mom))
-
-
 
         # here the tensors of the traceless extrinsic curvature given by the linear momentum and the spin
         self.r = CF((sqrt((x-self.pos[0])**2 + (y-self.pos[1])**2 + (z-self.pos[2])**2)))
