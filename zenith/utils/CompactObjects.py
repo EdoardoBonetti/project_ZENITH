@@ -11,8 +11,8 @@ class BlackHole:
                     mass : float = 1,
                     pos  : tuple[float, ...] = (0,0,0) ,
                     mom  : tuple[float, ...] = (0,0,0) ,
-                    spin : tuple[float, ...] = (0,0,0)
-                
+                    spin : tuple[float, ...] = (0,0,0) ,
+                    name : str = "BlackHole"
                 )->None:
     
         """
@@ -20,8 +20,13 @@ class BlackHole:
         pos: [tuple[float, ...]] the position of the black hole
         mom: [tuple[float, ...]] the linear momentum of the black hole
         spin: [tuple[float, ...]] the spin of the black hole
+        kwargs:
+            curve_order: [int] the order of the mesh
+            name : [str] the name of the black hole
         """
         
+        self.name = name
+
         self.fl_mass = mass
         self.fl_pos  = pos
         self.fl_spin = spin
@@ -93,11 +98,11 @@ def MeshBlackHoles(
 
     sphere_inner = Sphere(Pnt(blackholes[0].fl_pos[0],blackholes[0].fl_pos[1],blackholes[0].fl_pos[2]) ,r*blackholes[0].fl_mass).maxh(h)
     for bh in blackholes[1:len(blackholes)]:
-        sphere_inner += Sphere(Pnt(bh.fl_pos[0],bh.fl_pos[1],bh.fl_pos[2]),r*bh.fl_mass).maxh(h)
+        sphere_inner += Sphere(Pnt(bh.fl_pos[0],bh.fl_pos[1],bh.fl_pos[2]),r*bh.fl_mass).mat(bh.name).maxh(h)
     sphere_inner.bc("inner")
     geo.Add(sphere_inner)    
    
-    sphere_outer = Sphere(Pnt(x_cm,y_cm,z_cm),R)
+    sphere_outer = Sphere(Pnt(x_cm,y_cm,z_cm),R).mat("emptyspace")
     sphere_outer.bc("outer")
     geo.Add(sphere_outer- sphere_inner)
 
