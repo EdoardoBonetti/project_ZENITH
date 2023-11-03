@@ -2,6 +2,7 @@ __all__ = [ 'DefaultMesh',
             'BlackHole',
             'BowenYork',
             'VisualOptions',
+            'Spy',
             'BSSNPuncture',
             'EinsteinBianchi',
             'MeshBlackHoles'
@@ -9,6 +10,7 @@ __all__ = [ 'DefaultMesh',
 
 from .utils.Geometries import DefaultMesh
 from .utils.VisualOptions import VisualOptions
+from .utils.VisualOptions import Spy
 
 from .utils.CompactObjects import BlackHole
 
